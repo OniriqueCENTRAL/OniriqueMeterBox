@@ -13,10 +13,10 @@ namespace
 }
 
 Meter::Meter()
-    : history (new std::atomic<float>[(size_t) kHistoryCapacity * 4]),
+    : history (new std::atomic<float>[(size_t) kHistoryCapacity * kHistoryFloats]),
       scope (new std::atomic<float>[(size_t) kScopeFrames * 2])
 {
-    for (size_t i = 0; i < (size_t) kHistoryCapacity * 4; ++i)
+    for (size_t i = 0; i < (size_t) kHistoryCapacity * kHistoryFloats; ++i)
         history[i].store (kFloorDb, std::memory_order_relaxed);
 
     for (size_t i = 0; i < (size_t) kScopeFrames * 2; ++i)
@@ -79,6 +79,19 @@ void Meter::process (const float* const* in, int numChannels, int numSamples, bo
     {
         const auto used = meter.process (at, remaining, running);
 
+        for (int c = 0; c < kMaxChannels; ++c)
+        {
+            const auto* x = at[c];
+
+            for (int i = 0; i < used; ++i)
+            {
+                wavePeak[c] = std::max (wavePeak[c], std::abs (x[i]));
+                waveSquares[c] += (double) x[i] * x[i];
+            }
+        }
+
+        waveCount += used;
+
         if (meter.stepped())
         {
             const auto& values = meter.values();
@@ -87,18 +100,30 @@ void Meter::process (const float* const* in, int numChannels, int numSamples, bo
             if (running)
             {
                 const auto index = historyCount.load (std::memory_order_relaxed);
-                auto* point = history.get() + (size_t) (index % kHistoryCapacity) * 4;
+                auto* point = history.get() + (size_t) (index % kHistoryCapacity) * kHistoryFloats;
 
                 point[0].store (values.momentary, std::memory_order_relaxed);
                 point[1].store (values.shortTerm, std::memory_order_relaxed);
                 point[2].store (values.integrated, std::memory_order_relaxed);
                 point[3].store (std::max (values.peakNow[0], values.peakNow[1]), std::memory_order_relaxed);
+                point[4].store (wavePeak[0], std::memory_order_relaxed);
+                point[5].store (wavePeak[1], std::memory_order_relaxed);
+                point[6].store ((float) std::sqrt (waveSquares[0] / std::max (1, waveCount)), std::memory_order_relaxed);
+                point[7].store ((float) std::sqrt (waveSquares[1] / std::max (1, waveCount)), std::memory_order_relaxed);
 
                 historyCount.store (index + 1, std::memory_order_release);
 
                 for (int bin = 0; bin < kDistributionBins; ++bin)
                     spread[bin].store (meter.distribution (bin), std::memory_order_relaxed);
             }
+
+            for (int c = 0; c < kMaxChannels; ++c)
+            {
+                wavePeak[c] = 0.0f;
+                waveSquares[c] = 0.0;
+            }
+
+            waveCount = 0;
         }
 
         at[0] += used;
@@ -137,10 +162,12 @@ uint32_t Meter::historyStart() const noexcept
 
 HistoryPoint Meter::historyAt (uint32_t index) const noexcept
 {
-    const auto* point = history.get() + (size_t) (index % kHistoryCapacity) * 4;
+    const auto* point = history.get() + (size_t) (index % kHistoryCapacity) * kHistoryFloats;
 
     return { point[0].load (std::memory_order_relaxed), point[1].load (std::memory_order_relaxed),
-             point[2].load (std::memory_order_relaxed), point[3].load (std::memory_order_relaxed) };
+             point[2].load (std::memory_order_relaxed), point[3].load (std::memory_order_relaxed),
+             point[4].load (std::memory_order_relaxed), point[5].load (std::memory_order_relaxed),
+             point[6].load (std::memory_order_relaxed), point[7].load (std::memory_order_relaxed) };
 }
 
 int Meter::readScope (float* left, float* right, int maxFrames) const noexcept

@@ -87,7 +87,8 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
       loudness (p),
       history (p),
       spectrum (p),
-      phase (p)
+      phase (p),
+      waveform (p)
 {
     setLookAndFeel (&sharedLookAndFeel());
     logo = makeLogo();
@@ -98,6 +99,7 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     addAndMakeVisible (history);
     addAndMakeVisible (spectrum);
     addAndMakeVisible (phase);
+    addAndMakeVisible (waveform);
 
     // When it measures.
     syncButton.setClickingTogglesState (true);
@@ -139,6 +141,7 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     describe ({ &spectrum.targetBox }, "La cible de balance tonale : la forme du spectre d'un titre fini de ce style. Reference est celle que tu as capturée.");
     describe ({ &spectrum.averageBox }, "La durée de la moyenne : 3 s, 10 s, ou tout depuis la remise à zéro. Les silences ne comptent pas.");
     describe ({ &spectrum.captureButton }, "Capture : fait de la moyenne affichée la cible Reference. Joue un titre de référence, laisse la moyenne se poser, puis capture. Elle est enregistrée avec le projet.");
+    describe ({ &waveform }, "La forme d'onde de tout ce qui a été mesuré depuis la remise à zéro, du haut (le début) vers le bas (maintenant) : la gauche à gauche, la droite à droite. En rouge, les crêtes ; en clair au milieu, le niveau RMS. Les lignes sont -6 dB et la pleine échelle. Une marque blanche au bord là où le true peak a dépassé le plafond.");
     describe ({ &phase }, "La phase. Le goniomètre : ce qui est identique des deux côtés monte au milieu, ce qui est en opposition s'étale à l'horizontale. La barre : la corrélation, de -1 (les côtés s'annulent en mono) à +1 (mono), avec son minimum récent. Balance : le côté le plus fort. Width : la part du son qui est sur les côtés. Mono : ce que le mix perd une fois sommé en mono. En bas, la corrélation fréquence par fréquence : sous le milieu, cette zone disparaît en mono.");
     describe ({ &syncButton }, "Sync : la mesure suit le transport. Elle repart de zéro quand la lecture démarre et se fige à l'arrêt. Éteint, elle tourne en continu.");
     describe ({ &pauseButton }, "Pause : fige l'intégré, l'historique et les maxima. Les niveaux instantanés, le spectre et la phase continuent.");
@@ -155,8 +158,8 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     addAndMakeVisible (*licenseOverlay);
 
     setResizable (true, true);
-    setResizeLimits (1100, 660, 2400, 1400);
-    setSize (1280, 760);
+    setResizeLimits (1220, 660, 2400, 1400);
+    setSize (1400, 780);
 
     timerCallback();
     startTimerHz (30);
@@ -184,7 +187,10 @@ void MeterBoxEditor::timerCallback()
 
     // The history gains a point ten times a second: it is drawn as often.
     if (++ticks % 3 == 0)
+    {
         history.repaint();
+        waveform.repaint();
+    }
 
     // The standard the two figures amount to, if they amount to one.
     const auto standard = processor.getStandard();
@@ -421,12 +427,14 @@ void MeterBoxEditor::resized()
     if (licenseOverlay != nullptr)
         licenseOverlay->fit (getLocalBounds(), 1.0f, foot.withWidth (248).withSizeKeepingCentre (248, 26));
 
-    // Three columns: the loudness, the two graphs, the phase.
+    // Four columns: the loudness, the two graphs, the waveform, the phase.
     auto body = bounds.reduced (14, kGap);
 
     loudness.setBounds (body.removeFromLeft (jlimit (250, 300, body.getWidth() * 21 / 100)));
     body.removeFromLeft (kGap);
     phase.setBounds (body.removeFromRight (jlimit (270, 340, body.getWidth() * 29 / 100)));
+    body.removeFromRight (kGap);
+    waveform.setBounds (body.removeFromRight (jlimit (112, 150, body.getWidth() * 17 / 100)));
     body.removeFromRight (kGap);
 
     history.setBounds (body.removeFromTop (body.getHeight() * 42 / 100));

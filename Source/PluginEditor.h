@@ -11,13 +11,15 @@
 #include "ui/PhasePanel.h"
 #include "ui/SpectrumDisplay.h"
 #include "ui/Theme.h"
+#include "ui/WaveformPanel.h"
 
 namespace onirique
 {
 
 /** One window, read from left to right: how loud (the figures and the
     bars), how that has moved and what the spectrum looks like (the two
-    graphs in the middle), and how the two sides sit against each other.
+    graphs in the middle), the whole of it as a waveform, and how the two
+    sides sit against each other.
 
     The header is when it measures; the foot, what it measures against. */
 class MeterBoxEditor final : public AudioProcessorEditor,
@@ -48,6 +50,7 @@ private:
     HistoryGraph history;
     SpectrumDisplay spectrum;
     PhasePanel phase;
+    WaveformPanel waveform;
     mtx::SpectrumFrame frame;
     int ticks = 0;
 

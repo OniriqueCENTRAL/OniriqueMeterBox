@@ -91,7 +91,8 @@ target_sources(OniriqueMeterBox PRIVATE
     Source/ui/LoudnessPanel.cpp
     Source/ui/PhasePanel.cpp
     Source/ui/SpectrumDisplay.cpp
-    Source/ui/Theme.cpp)
+    Source/ui/Theme.cpp
+    Source/ui/WaveformPanel.cpp)
 
 # The licence every Onirique plugin carries: the folder is copied as it is from
 # plugin-license/ in the ONIRIQUE CENTRAL repository, and is only ever changed there.

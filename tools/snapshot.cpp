@@ -293,8 +293,8 @@ int main (int argc, char** argv)
     arguments.removeString ("--bench");
 
     const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (arguments[0]);
-    const auto width = arguments.size() > 2 ? arguments[1].getIntValue() : 1280;
-    const auto height = arguments.size() > 2 ? arguments[2].getIntValue() : 760;
+    const auto width = arguments.size() > 2 ? arguments[1].getIntValue() : 1400;
+    const auto height = arguments.size() > 2 ? arguments[2].getIntValue() : 780;
 
     {
         Director director (file, outOfPhase, withLicence, bench, width, height);

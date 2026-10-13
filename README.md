@@ -139,6 +139,15 @@ En bas, le même écart résumé en quatre zones (Low jusqu'à 250 Hz, Low-Mid
 jusqu'à 2 kHz, High-Mid jusqu'à 8 kHz, High au-delà), en dB par rapport à la
 cible ; la partie claire de chaque jauge est ce que la cible admet.
 
+### Waveform
+
+La forme d'onde de tout ce qui a été mesuré depuis la remise à zéro, en
+colonne : le début en haut, maintenant en bas, la gauche à gauche du milieu et
+la droite à droite. En rouge, les crêtes ; en clair au milieu, le niveau RMS.
+Les lignes sont −6 dB et la pleine échelle ; une marque blanche au bord signale
+un true peak au-dessus du plafond. Elle montre toujours tout (une heure au
+plus), quelle que soit la durée choisie pour l'historique.
+
 ### Phase
 
 - **Le goniomètre** : chaque échantillon est un point. Ce qui est identique des
@@ -161,7 +170,7 @@ cible ; la partie claire de chaque jauge est ce que la cible admet.
 
 Mesuré sur un cœur, à 48 kHz : 0,1 % sur le thread audio (les filtres du
 loudness et le true peak), 0,3 % pour les transformées du spectre, faites sur
-un fil à part, et environ 4 ms pour dessiner la fenêtre, trente fois par
+un fil à part, et environ 5 ms pour dessiner la fenêtre, trente fois par
 seconde tant qu'elle est ouverte.
 
 Pendant un export, les transformées sont faites dans le rendu lui-même : la

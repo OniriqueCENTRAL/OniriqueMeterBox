@@ -416,6 +416,12 @@ void testMeter()
     check (within (meter.loudness().integrated, -18.0, 0.1) && within (meter.historyAt (49).shortTerm, -18.0, 0.1),
            "and they hold what was measured");
 
+    {
+        // -18 dBFS: 0.126 at the crest, 0.089 RMS.
+        const auto point = meter.historyAt (49);
+        check (within (point.peakLeft, 0.1259, 0.001) && within (point.rmsRight, 0.0890, 0.001), "with the waveform of each tenth of a second");
+    }
+
     play (3.0, false);
     check (meter.historyEnd() == 50 && within (meter.loudness().momentary, -18.0, 0.1),
            "paused, the history stops and the momentary loudness goes on");

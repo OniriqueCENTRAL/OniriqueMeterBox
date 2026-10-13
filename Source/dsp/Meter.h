@@ -24,7 +24,14 @@ struct HistoryPoint
 {
     float momentary = kFloorDb, shortTerm = kFloorDb, integrated = kFloorDb;
     float truePeak = kFloorDb;      // of that tenth of a second, the higher side
+
+    // The waveform of that tenth of a second, as amplitudes: the highest
+    // sample of each side, and its RMS.
+    float peakLeft = 0.0f, peakRight = 0.0f, rmsLeft = 0.0f, rmsRight = 0.0f;
 };
+
+/** How many floats a point of the history is kept as. */
+constexpr uint32_t kHistoryFloats = 8;
 
 /** A struct of floats written by one thread and read by others, one float at
     a time: what is read may mix two steps, which a meter can live with. */
@@ -115,12 +122,17 @@ private:
     Shared<StereoValues> stereoShared;
     std::atomic<uint32_t> spread[kDistributionBins];
 
-    std::unique_ptr<std::atomic<float>[]> history;      // four floats to the point, a ring
+    std::unique_ptr<std::atomic<float>[]> history;      // kHistoryFloats to the point, a ring
     std::atomic<uint32_t> historyCount { 0 };
 
     std::unique_ptr<std::atomic<float>[]> scope;        // left and right, a ring
     std::atomic<uint32_t> scopeCount { 0 };
     int scopeStride = 1, scopePhase = 0;
+
+    // The waveform of the step in hand.
+    float wavePeak[kMaxChannels] = {};
+    double waveSquares[kMaxChannels] = {};
+    int waveCount = 0;
 
     int channels = 2;
     std::atomic<bool> resetPending { false };

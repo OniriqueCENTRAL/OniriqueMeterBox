@@ -91,7 +91,8 @@ Mesuré selon ITU-R BS.1770-4 et EBU R 128.
 - **Integrated**, en grand : le loudness de tout ce qui a été joué depuis la
   remise à zéro, avec ses deux seuils (absolu à −70 LUFS, relatif à −10 LU), et
   son écart à la cible.
-- **Les barres**, sur une seule échelle : le true peak de chaque côté, puis le
+- **Les barres**, sur une seule échelle : le true peak de chaque côté (sa valeur
+  en direct est écrite au-dessus), puis le
   loudness momentané (0,4 s), court terme (3 s) et intégré. Les traits blancs
   sont le plafond et la cible ; ce qui les dépasse est chauffé à blanc. Les
   petits traits sont les maxima.
@@ -144,8 +145,10 @@ cible ; la partie claire de chaque jauge est ce que la cible admet.
 La forme d'onde de tout ce qui a été mesuré depuis la remise à zéro, en
 colonne : le début en haut, maintenant en bas, la gauche à gauche du milieu et
 la droite à droite. En rouge, les crêtes ; en clair au milieu, le niveau RMS.
-Les lignes sont −6 dB et la pleine échelle ; une marque blanche au bord signale
-un true peak au-dessus du plafond. Elle montre toujours tout (une heure au
+Les lignes sont −12 dB, −6 dB et la pleine échelle ; une marque blanche au bord
+signale un true peak au-dessus du plafond. En dessous, les chiffres : la crête
+la plus haute de chaque côté depuis la remise à zéro, le niveau RMS de chaque
+côté et le facteur de crête sur la dernière seconde, et la durée mesurée. Elle montre toujours tout (une heure au
 plus), quelle que soit la durée choisie pour l'historique.
 
 ### Phase

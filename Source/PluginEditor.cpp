@@ -134,14 +134,14 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
 
     // What each part does, for a pointer that rests on it. A part comes
     // before the controls that lie on it.
-    describe ({ &loudness }, "Le loudness. En grand, le niveau intégré (LUFS) depuis la remise à zéro, et son écart à la cible. Les barres : le true peak de chaque côté, puis le loudness momentané (0,4 s), court terme (3 s) et intégré, sur la même échelle. Les traits blancs sont le plafond et la cible ; les petits traits, les maxima. En dessous : la plage de loudness (LRA), le true peak le plus haut, le PLR (crête sur loudness intégré) et le PSR (crête sur loudness court terme).");
+    describe ({ &loudness }, "Le loudness. En grand, le niveau intégré (LUFS) depuis la remise à zéro, et son écart à la cible. Les barres : le true peak de chaque côté, avec sa valeur en direct au-dessus, puis le loudness momentané (0,4 s), court terme (3 s) et intégré, sur la même échelle. Les traits blancs sont le plafond et la cible ; les petits traits, les maxima. En dessous : la plage de loudness (LRA), le true peak le plus haut, le PLR (crête sur loudness intégré) et le PSR (crête sur loudness court terme).");
     describe ({ &history }, "L'historique : le loudness momentané en fond, le court terme en rouge, l'intégré en blanc, la cible en pointillés. Une marque blanche en haut là où le true peak a dépassé le plafond. À droite, la répartition : le temps passé par le court terme à chaque niveau.");
     describe ({ &history.spanBox }, "La durée affichée : les 30 dernières secondes, 2 minutes, 10 minutes, ou tout depuis la remise à zéro (une heure au plus).");
     describe ({ &spectrum }, "Le spectre, par tiers d'octave : un bruit rose y est une ligne plate. En rouge, le spectre à l'instant ; en blanc, sa moyenne ; la bande claire, la forme attendue pour le style choisi, posée sur la moyenne quel que soit le niveau. La moyenne passe au rouge là où elle sort de la bande. En bas, le même écart résumé en quatre zones.");
     describe ({ &spectrum.targetBox }, "La cible de balance tonale : la forme du spectre d'un titre fini de ce style. Reference est celle que tu as capturée.");
     describe ({ &spectrum.averageBox }, "La durée de la moyenne : 3 s, 10 s, ou tout depuis la remise à zéro. Les silences ne comptent pas.");
     describe ({ &spectrum.captureButton }, "Capture : fait de la moyenne affichée la cible Reference. Joue un titre de référence, laisse la moyenne se poser, puis capture. Elle est enregistrée avec le projet.");
-    describe ({ &waveform }, "La forme d'onde de tout ce qui a été mesuré depuis la remise à zéro, du haut (le début) vers le bas (maintenant) : la gauche à gauche, la droite à droite. En rouge, les crêtes ; en clair au milieu, le niveau RMS. Les lignes sont -6 dB et la pleine échelle. Une marque blanche au bord là où le true peak a dépassé le plafond.");
+    describe ({ &waveform }, "La forme d'onde de tout ce qui a été mesuré depuis la remise à zéro, du haut (le début) vers le bas (maintenant) : la gauche à gauche, la droite à droite. En rouge, les crêtes ; en clair au milieu, le niveau RMS. Les lignes sont -12 dB, -6 dB et la pleine échelle. Une marque blanche au bord là où le true peak a dépassé le plafond. En dessous : la crête la plus haute de chaque côté depuis la remise à zéro, puis le niveau RMS de chaque côté et le facteur de crête sur la dernière seconde, et la durée mesurée.");
     describe ({ &phase }, "La phase. Le goniomètre : ce qui est identique des deux côtés monte au milieu, ce qui est en opposition s'étale à l'horizontale. La barre : la corrélation, de -1 (les côtés s'annulent en mono) à +1 (mono), avec son minimum récent. Balance : le côté le plus fort. Width : la part du son qui est sur les côtés. Mono : ce que le mix perd une fois sommé en mono. En bas, la corrélation fréquence par fréquence : sous le milieu, cette zone disparaît en mono.");
     describe ({ &syncButton }, "Sync : la mesure suit le transport. Elle repart de zéro quand la lecture démarre et se fige à l'arrêt. Éteint, elle tourne en continu.");
     describe ({ &pauseButton }, "Pause : fige l'intégré, l'historique et les maxima. Les niveaux instantanés, le spectre et la phase continuent.");
@@ -434,7 +434,7 @@ void MeterBoxEditor::resized()
     body.removeFromLeft (kGap);
     phase.setBounds (body.removeFromRight (jlimit (270, 340, body.getWidth() * 29 / 100)));
     body.removeFromRight (kGap);
-    waveform.setBounds (body.removeFromRight (jlimit (112, 150, body.getWidth() * 17 / 100)));
+    waveform.setBounds (body.removeFromRight (jlimit (128, 160, body.getWidth() * 17 / 100)));
     body.removeFromRight (kGap);
 
     history.setBounds (body.removeFromTop (body.getHeight() * 42 / 100));

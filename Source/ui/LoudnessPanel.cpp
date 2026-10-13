@@ -149,7 +149,7 @@ void LoudnessPanel::paint (Graphics& g)
     //==============================================================================
     // The bars.
     auto names = area.removeFromBottom (16.0f);
-    auto heads = area.removeFromTop (14.0f);
+    auto heads = area.removeFromTop (30.0f);
     const auto scale = area.removeFromLeft (24.0f);
     area.removeFromLeft (6.0f);
     names.removeFromLeft (30.0f);
@@ -251,11 +251,28 @@ void LoudnessPanel::paint (Graphics& g)
     limitLine (ceiling, bars[peakLeft].getUnion (bars[peakRight]));
     limitLine (target, bars[momentary].getUnion (bars[integrated]));
 
+    // Over the two narrow bars, the true peak of each side as it stands:
+    // the figure the mark on its bar is at.
+    {
+        auto live = Rectangle<float> (scale.getX(), heads.getY(), bars[peakRight].getRight() + 6.0f - scale.getX(), 26.0f);
+
+        for (int c = 0; c < 2; ++c)
+        {
+            auto r = live.removeFromTop (13.0f);
+
+            g.setColour (haze);
+            g.setFont (capsFont (8.5f));
+            g.drawText (c == 0 ? "TP L" : "TP R", r, Justification::centredLeft, false);
+
+            g.setColour (held[c] > ceiling ? emberLit : mist);
+            g.setFont (monoFont (10.5f).boldened());
+            g.drawText (levelText (jmax (held[c], mtx::kFloorDb)), r, Justification::centredRight, false);
+        }
+    }
+
     g.setColour (haze);
     g.setFont (capsFont (8.5f));
-    g.drawText ("TP", bars[peakLeft].getUnion (bars[peakRight]).withY (heads.getY()).withHeight (heads.getHeight()).expanded (6.0f, 0.0f),
-                Justification::centred, false);
-    g.drawText ("LUFS", bars[momentary].getUnion (bars[integrated]).withY (heads.getY()).withHeight (heads.getHeight()),
+    g.drawText ("LUFS", bars[momentary].getUnion (bars[integrated]).withY (heads.getBottom() - 14.0f).withHeight (14.0f),
                 Justification::centred, false);
 }
 

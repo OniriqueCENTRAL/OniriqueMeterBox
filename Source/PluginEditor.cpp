@@ -408,6 +408,11 @@ void MeterBoxEditor::resized()
     // runs along its foot.
     auto row = header.withTrimmedBottom (6).withSizeKeepingCentre (header.getWidth(), 30).withTrimmedRight (14);
 
+    // The licence badge is the header's last button, at the right end like the others' Bypass: the same height,
+    // the same capsule. Its room follows its wording, and the header is laid out again when the licence changes.
+    if (licenseOverlay != nullptr)
+        licenseOverlay->fit (getLocalBounds(), 1.0f, row.removeFromRight (licenseOverlay->pillWidth()), Justification::centredRight);
+    row.removeFromRight (10);
     resetButton.setBounds (row.removeFromRight (76));
     row.removeFromRight (10);
     pauseButton.setBounds (row.removeFromRight (96));
@@ -422,10 +427,6 @@ void MeterBoxEditor::resized()
     foot.removeFromRight (14);
     standardBox.setBounds (foot.removeFromRight (176).withSizeKeepingCentre (176, 26));
 
-    // The licence badge takes the empty left of the foot. The window grows by
-    // giving its contents more room, not by zooming them: the scale is 1.
-    if (licenseOverlay != nullptr)
-        licenseOverlay->fit (getLocalBounds(), 1.0f, foot.withWidth (248).withSizeKeepingCentre (248, 26));
 
     // Four columns: the loudness, the two graphs, the waveform, the phase.
     auto body = bounds.reduced (14, kGap);

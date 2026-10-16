@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "ui/OniriqueWindowSize.h"
 
 #include <BinaryData.h>
 
@@ -159,7 +160,9 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
 
     setResizable (true, true);
     setResizeLimits (1220, 660, 2400, 1400);
-    setSize (1400, 780);
+    // taille d'ouverture : la règle commune des plugins ONIRIQUE (ui/OniriqueWindowSize.h)
+    const auto opening = onirique::window::openingSize ({}, "ONIRIQUE METERBOX", { 1400, 780 }, { 1220, 660 }, { 2400, 1400 });
+    setSize (opening.x, opening.y);
 
     timerCallback();
     startTimerHz (30);
@@ -167,6 +170,7 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
 
 MeterBoxEditor::~MeterBoxEditor()
 {
+    onirique::window::rememberOnThisComputer ("ONIRIQUE METERBOX", getWidth(), getHeight());
     setLookAndFeel (nullptr);
 }
 

@@ -1,0 +1,7 @@
+Test project D:/a/OniriqueMeterBox/OniriqueMeterBox/build
+    Start 1: meter
+1/1 Test #1: meter ............................   Passed    5.10 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   5.15 sec

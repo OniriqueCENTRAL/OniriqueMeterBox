@@ -183,6 +183,14 @@ void MeterBoxEditor::hideLicence()
 //==============================================================================
 void MeterBoxEditor::timerCallback()
 {
+    // la couleur de l'interface (menu ⋯, ou changée dans un autre plugin ONIRIQUE) : tout se redessine
+    if (onirique::look::changedSince (themeSeen))
+    {
+        daBackdrop = {};
+        daBackdrop = {};
+        std::function<void (juce::Component&)> all = [&all] (juce::Component& k) { k.repaint(); for (auto* ch : k.getChildren()) all (*ch); };
+        all (*this);
+    }
     processor.getMeter().readSpectrum (frame);
 
     loudness.refresh();
@@ -285,9 +293,9 @@ void MeterBoxEditor::paintHeader (Graphics& g, Rectangle<int> header)
 
     // The crimson of the range: darkest at the sigil, brightest behind the
     // name, and falling away again to the right and towards the foot.
-    ColourGradient ground (Colour (0xff2c060b), 0.0f, 0.0f, Colour (0xff3b080e), area.getRight(), 0.0f, false);
-    ground.addColour (0.32, Colour (0xff7a0e1c));
-    ground.addColour (0.7, Colour (0xff5a0a14));
+    ColourGradient ground (onirique::look::tint (0xff2c060b), 0.0f, 0.0f, onirique::look::tint (0xff3b080e), area.getRight(), 0.0f, false);
+    ground.addColour (0.32, onirique::look::tint (0xff7a0e1c));
+    ground.addColour (0.7, onirique::look::tint (0xff5a0a14));
     g.setGradientFill (ground);
     g.fillRect (area);
 
@@ -398,7 +406,9 @@ void MeterBoxEditor::paintHeader (Graphics& g, Rectangle<int> header)
 
 void MeterBoxEditor::paint (Graphics& g)
 {
-    g.fillAll (night);
+    if (daBackdrop.getWidth() != getWidth() || daBackdrop.getHeight() != getHeight())
+        daBackdrop = onirique::da::backdrop (getWidth(), getHeight(), (float) getWidth() / 1100.0f);
+    g.drawImageAt (daBackdrop, 0, 0);
 
     paintHeader (g, getLocalBounds().removeFromTop (kHeaderHeight));
 }
@@ -414,6 +424,9 @@ void MeterBoxEditor::resized()
 
     // The licence badge is the header's last button, at the right end like the others' Bypass: the same height,
     // the same capsule. Its room follows its wording, and the header is laid out again when the licence changes.
+    if (themeButton.getParentComponent() == nullptr) addAndMakeVisible (themeButton);
+    themeButton.setBounds (row.removeFromRight (38).withSizeKeepingCentre (38, 26));   // ⋯ : la couleur de l'interface, au bout à droite
+    row.removeFromRight (10);
     if (licenseOverlay != nullptr)
         licenseOverlay->fit (getLocalBounds(), 1.0f, row.removeFromRight (licenseOverlay->pillWidth()), Justification::centredRight);
     row.removeFromRight (10);

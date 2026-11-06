@@ -55,6 +55,7 @@ class OniriqueLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     OniriqueLookAndFeel();
+    void applyColours();   // rappelée quand la couleur de l'interface change
 
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&,
                                bool highlighted, bool down) override;

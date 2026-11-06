@@ -14,9 +14,7 @@ namespace
     {
         static OniriqueLookAndFeel laf;
         return laf;
-    }
-
-    constexpr int kHeaderHeight = 68;
+    }
     constexpr int kTitleLeft = 72;
     constexpr int kFootHeight = 46;
     constexpr int kGap = 12;
@@ -155,6 +153,10 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     hoverTip.setAlwaysOnTop (true);
     addChildComponent (hoverTip);
 
+    // la barre « Nuit » à la place de l'ancien en-tête
+    addAndMakeVisible (bar);
+    bar.onThemeChanged = [this] { themeSeen = -1; };
+
     licenseOverlay = std::make_unique<onirique::license::Overlay> ("METERBOX", processor.license);
     addAndMakeVisible (*licenseOverlay);
 
@@ -215,7 +217,7 @@ void MeterBoxEditor::timerCallback()
     updateHoverTip();
 
     // The header keeps time, and says what the meter is doing.
-    repaint (0, 0, getWidth(), kHeaderHeight);
+    repaint (statusArea);   // l'état de la mesure et son horloge
 }
 
 void MeterBoxEditor::describe (std::initializer_list<Component*> components, const char* text)
@@ -404,37 +406,67 @@ void MeterBoxEditor::paintHeader (Graphics& g, Rectangle<int> header)
     g.fillRoundedRectangle (tail, footY - 0.5f, length + 6.0f, 2.0f, 1.0f);
 }
 
+Image MeterBoxEditor::barSigil()
+{
+    return ImageCache::getFromMemory (BinaryData::sigil_png, BinaryData::sigil_pngSize);
+}
+
+/** L'état de la mesure, au pied à gauche : le témoin (qui respire pendant la mesure), le mot, et depuis combien de temps. */
+void MeterBoxEditor::paintStatus (Graphics& g)
+{
+    if (statusArea.getWidth() < 120)
+        return;
+
+    const auto seconds = (Time::getMillisecondCounterHiRes() - openedAt) * 0.001;
+    const auto measuring = processor.isMeasuring();
+    const auto elapsed = (int) (processor.getMeter().historyEnd() / (uint32) mtx::kStepsPerSecond);
+    const auto text = measuring ? "MEASURING" : processor.isWaitingForHost() ? "WAITING FOR PLAYBACK" : "PAUSED";
+    auto row = statusArea.toFloat();
+
+    const auto led = Rectangle<float> (7.0f, 7.0f).withCentre ({ row.getX() + 5.0f, row.getCentreY() });
+    const auto pulse = 0.5f + 0.5f * (float) std::sin (seconds * 4.0);
+
+    if (measuring)
+    {
+        g.setColour (ember.withAlpha (0.2f + 0.25f * pulse));
+        g.fillEllipse (led.expanded (3.5f));
+    }
+
+    g.setColour (measuring ? emberLit : Colour (0x55ffd2d6));
+    g.fillEllipse (led);
+    row.removeFromLeft (18.0f);
+
+    const auto textWidth = GlyphArrangement::getStringWidth (capsFont (10.0f), text) + 4.0f;
+    g.setColour (measuring ? mist : haze);
+    g.setFont (capsFont (10.0f));
+    g.drawText (text, row.removeFromLeft (textWidth), Justification::centredLeft, false);
+    row.removeFromLeft (10.0f);
+
+    g.setColour (Colours::white);
+    g.setFont (monoFont (13.0f).boldened());
+    g.drawText (clockText (elapsed), row, Justification::centredLeft, false);
+}
+
 void MeterBoxEditor::paint (Graphics& g)
 {
     if (daBackdrop.getWidth() != getWidth() || daBackdrop.getHeight() != getHeight())
         daBackdrop = onirique::da::backdrop (getWidth(), getHeight(), (float) getWidth() / 1100.0f);
     g.drawImageAt (daBackdrop, 0, 0);
 
-    paintHeader (g, getLocalBounds().removeFromTop (kHeaderHeight));
+    paintStatus (g);
 }
 
 void MeterBoxEditor::resized()
 {
     auto bounds = getLocalBounds();
-    auto header = bounds.removeFromTop (kHeaderHeight);
+    bounds.removeFromTop (headerHeight());
 
-    // Controls sit in the upper part of the header, clear of the light that
-    // runs along its foot.
-    auto row = header.withTrimmedBottom (6).withSizeKeepingCentre (header.getWidth(), 30).withTrimmedRight (14);
-
-    // The licence badge is the header's last button, at the right end like the others' Bypass: the same height,
-    // the same capsule. Its room follows its wording, and the header is laid out again when the licence changes.
-    if (themeButton.getParentComponent() == nullptr) addAndMakeVisible (themeButton);
-    themeButton.setBounds (row.removeFromRight (38).withSizeKeepingCentre (38, 26));   // ⋯ : la couleur de l'interface, au bout à droite
-    row.removeFromRight (10);
+    // la barre « Nuit » en haut, la pastille de licence à sa place dans la barre
+    const float barScale = (float) getWidth() / (float) kBarUnits;
+    bar.setPillWidth (licenseOverlay != nullptr ? licenseOverlay->pillWidth() : 0);
+    bar.place (barScale, getLocalBounds());
     if (licenseOverlay != nullptr)
-        licenseOverlay->fit (getLocalBounds(), 1.0f, row.removeFromRight (licenseOverlay->pillWidth()), Justification::centredRight);
-    row.removeFromRight (10);
-    resetButton.setBounds (row.removeFromRight (76));
-    row.removeFromRight (10);
-    pauseButton.setBounds (row.removeFromRight (96));
-    row.removeFromRight (6);
-    syncButton.setBounds (row.removeFromRight (90));
+        licenseOverlay->fit (getLocalBounds(), barScale, bar.getPillArea(), Justification::centredRight);
 
     auto foot = bounds.removeFromBottom (kFootHeight).reduced (14, 0).withTrimmedBottom (12).withTrimmedTop (4);
 
@@ -443,6 +475,15 @@ void MeterBoxEditor::resized()
     target.setBounds (foot.removeFromRight (164));
     foot.removeFromRight (14);
     standardBox.setBounds (foot.removeFromRight (176).withSizeKeepingCentre (176, 26));
+
+    // au pied, à gauche : SYNC, PAUSE, RESET, puis l'état de la mesure (ils étaient dans l'en-tête)
+    syncButton.setBounds (foot.removeFromLeft (90).withSizeKeepingCentre (90, 28));
+    foot.removeFromLeft (6);
+    pauseButton.setBounds (foot.removeFromLeft (96).withSizeKeepingCentre (96, 28));
+    foot.removeFromLeft (10);
+    resetButton.setBounds (foot.removeFromLeft (76).withSizeKeepingCentre (76, 28));
+    foot.removeFromLeft (16);
+    statusArea = foot.removeFromLeft (jmin (foot.getWidth() - 14, 260));
 
 
     // Four columns: the loudness, the two graphs, the waveform, the phase.

@@ -286,6 +286,7 @@ bool MeterBoxProcessor::captureReference()
 void MeterBoxProcessor::getStateInformation (MemoryBlock& destination)
 {
     auto state = apvts.copyState();
+    presets.writeState (state);   // le côté A/B écouté, et l'autre
 
     {
         // The captured shape goes with the project: a point to the number.
@@ -317,7 +318,7 @@ void MeterBoxProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
         return;
 
-    const auto state = ValueTree::fromXml (*xml);
+    auto state = ValueTree::fromXml (*xml);
     const auto points = StringArray::fromTokens (state.getProperty (kReferenceProperty).toString(), " ", "");
 
     {
@@ -336,6 +337,7 @@ void MeterBoxProcessor::setStateInformation (const void* data, int sizeInBytes)
         }
     }
 
+    presets.readState (state);   // l'autre côté A/B
     apvts.replaceState (state);
 }
 

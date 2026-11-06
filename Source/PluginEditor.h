@@ -1,5 +1,6 @@
 // Onirique MeterBox — editor
 #pragma once
+#include "ui/OniriqueBar.h"   // la barre « Nuit » de VOCALBOX
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "../License/OniriqueThemeButton.h"
@@ -47,6 +48,21 @@ private:
     int titleRight() const;
 
     MeterBoxProcessor& processor;
+
+
+    // la barre « Nuit » (réglages gardés, A/B, menu ⋯ avec la couleur de l'interface), à la place de l'en-tête
+
+    static constexpr int kBarUnits = 1029;   // 50 points de haut = 68 pixels à la taille d'ouverture (1400)
+
+    static Image barSigil();
+
+    onirique::nuit::Bar bar { processor.presets, processor.apvts, "METERBOX", barSigil(), kBarUnits, 1400 };
+
+    int headerHeight() const { return roundToInt (50.0f * (float) getWidth() / (float) kBarUnits); }
+
+    Rectangle<int> statusArea;   // l'état de la mesure, au pied à gauche
+
+    void paintStatus (Graphics&);
 
     LoudnessPanel loudness;
     HistoryGraph history;

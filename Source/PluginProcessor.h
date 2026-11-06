@@ -5,6 +5,7 @@
 
 #include "License/LicenseGuard.h"
 #include "dsp/Meter.h"
+#include "ui/OniriquePresets.h"
 
 namespace onirique
 {
@@ -88,6 +89,11 @@ public:
     bool hasReference() const;
 
     AudioProcessorValueTreeState apvts;
+
+
+    /** Les réglages gardés (cible, plafond, courbe…) et la comparaison A/B : ce que montre la barre « Nuit » du haut. */
+
+    PresetBank presets { apvts, "MeterBox", { { "Default", 0, {} } }, {} };
 
     /** The licence ONIRIQUE CENTRAL wrote on this machine for this plugin, under
         the identifier the plugin has in its catalogue. */

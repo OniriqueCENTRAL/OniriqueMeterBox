@@ -1,0 +1,2 @@
+MeterBox-macOS-AU.zip
+MeterBox-macOS-VST3.zip

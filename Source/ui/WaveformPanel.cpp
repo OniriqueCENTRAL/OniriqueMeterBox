@@ -42,23 +42,55 @@ void WaveformPanel::paint (Graphics& g)
         body.removeFromRight (28.0f);
     }
 
-    const auto names = body.removeFromTop (14.0f);
+    // Wide, the waveform also lies on its side: time from left to right, the
+    // left side above the middle and the right below. It is drawn as when it
+    // runs down the panel, in a frame turned a quarter, and only the words
+    // are written apart, so that they are not turned with it.
+    Rectangle<float> names, marks, plot, frame;
 
-    if (! wide)
+    if (wide)
     {
+        auto side = body.removeFromLeft (34.0f);
+        side.removeFromBottom (16.0f);
+        body.removeFromBottom (16.0f);
+        plot = body;
+        names = side;
+        frame = { 0.0f, 0.0f, plot.getHeight(), plot.getWidth() };
+    }
+    else
+    {
+        names = body.removeFromTop (14.0f);
         figures = body.removeFromBottom ((ref != nullptr ? 9.0f : 6.0f) * 17.0f);
         body.removeFromBottom (6.0f);
+        marks = body.removeFromBottom (11.0f);
+        plot = body;
+        frame = plot;
     }
 
-    const auto marks = body.removeFromBottom (11.0f);
-    const auto plot = body;
-    const auto centre = plot.getCentreX();
-    const auto reach = plot.getWidth() * 0.5f - 4.0f;       // full scale
+    // In the turned frame, x is the amplitude and y the time, as in the column.
+    const auto centre = frame.getCentreX();
+    const auto reach = frame.getWidth() * 0.5f - 4.0f;       // full scale
+    const auto turn = wide ? AffineTransform (0.0f, 1.0f, plot.getX(), 1.0f, 0.0f, plot.getY()) : AffineTransform();
+
+    // Where a point of the frame is on the screen.
+    auto onScreen = [&turn] (float x, float y) { auto px = x, py = y; turn.transformPoint (px, py); return Point<float> (px, py); };
 
     g.setColour (haze);
     g.setFont (capsFont (9.0f));
-    g.drawText ("L", names.withWidth (names.getWidth() * 0.5f), Justification::centred, false);
-    g.drawText ("R", names.withTrimmedLeft (names.getWidth() * 0.5f), Justification::centred, false);
+
+    if (wide)
+    {
+        g.drawText ("L", Rectangle<float> (names.getX(), onScreen (centre - reach * 0.25f, 0.0f).y - 6.0f, 12.0f, 12.0f), Justification::centredLeft, false);
+        g.drawText ("R", Rectangle<float> (names.getX(), onScreen (centre + reach * 0.25f, 0.0f).y - 6.0f, 12.0f, 12.0f), Justification::centredLeft, false);
+    }
+    else
+    {
+        g.drawText ("L", names.withWidth (names.getWidth() * 0.5f), Justification::centred, false);
+        g.drawText ("R", names.withTrimmedLeft (names.getWidth() * 0.5f), Justification::centred, false);
+    }
+
+    g.saveState();
+    g.addTransform (turn);
 
 
     // The grid: the middle, then -12 dB, -6 dB and full scale on each side,
@@ -71,9 +103,13 @@ void WaveformPanel::paint (Graphics& g)
             const auto x = centre + side * amplitude * reach;
 
             g.setColour (line);
-            g.fillRect (x, plot.getY(), 1.0f, plot.getHeight());
-            g.setColour (haze.withAlpha (0.7f));
-            g.drawText (name, Rectangle<float> (x - 10.0f, marks.getY(), 20.0f, marks.getHeight()), Justification::centred, false);
+            g.fillRect (x, frame.getY(), 1.0f, frame.getHeight());
+
+            if (! wide)
+            {
+                g.setColour (haze.withAlpha (0.7f));
+                g.drawText (name, Rectangle<float> (x - 10.0f, marks.getY(), 20.0f, marks.getHeight()), Justification::centred, false);
+            }
         }
 
     //==============================================================================
@@ -83,7 +119,7 @@ void WaveformPanel::paint (Graphics& g)
     const auto count = (int) (end - first);
     const auto visible = jmax (30 * mtx::kStepsPerSecond, count);
 
-    auto yOf = [plot, first, visible] (double index) { return plot.getY() + plot.getHeight() * (float) ((index - first) / (double) visible); };
+    auto yOf = [frame, first, visible] (double index) { return frame.getY() + frame.getHeight() * (float) ((index - first) / (double) visible); };
 
     // Time down the side, counted from the reset.
     const auto seconds = visible / mtx::kStepsPerSecond;
@@ -101,16 +137,16 @@ void WaveformPanel::paint (Graphics& g)
     g.setColour (line);
 
     for (auto t = (firstSecond / every + 1) * every; t < firstSecond + seconds; t += every)
-        g.fillRect (plot.getX(), yOf ((double) t * mtx::kStepsPerSecond), plot.getWidth(), 1.0f);
+        g.fillRect (frame.getX(), yOf ((double) t * mtx::kStepsPerSecond), frame.getWidth(), 1.0f);
 
     if (count >= 2)
     {
         Graphics::ScopedSaveState state (g);
-        g.reduceClipRegion (plot.toNearestInt());
+        g.reduceClipRegion (frame.toNearestInt());
 
         // No more rows than there are pixels: each stands for the highest
         // of the stretch it covers.
-        const auto steps = jlimit (2, count, roundToInt (plot.getHeight() * (float) count / (float) visible));
+        const auto steps = jlimit (2, count, roundToInt (frame.getHeight() * (float) count / (float) visible));
 
         struct Row { float y, peakLeft, peakRight, rmsLeft, rmsRight; bool over; };
         std::vector<Row> rows;
@@ -167,13 +203,30 @@ void WaveformPanel::paint (Graphics& g)
         for (const auto& row : rows)
             if (row.over)
             {
-                g.fillRect (plot.getX(), row.y - 1.0f, 6.0f, 2.0f);
-                g.fillRect (plot.getRight() - 6.0f, row.y - 1.0f, 6.0f, 2.0f);
+                g.fillRect (frame.getX(), row.y - 1.0f, 6.0f, 2.0f);
+                g.fillRect (frame.getRight() - 6.0f, row.y - 1.0f, 6.0f, 2.0f);
             }
     }
 
     g.setColour (Colour (0x40ffd2d6));
-    g.fillRect (centre, plot.getY(), 1.0f, plot.getHeight());
+    g.fillRect (centre, frame.getY(), 1.0f, frame.getHeight());
+
+    // Back to the screen for the words.
+    g.restoreState();
+
+    // On its side, the levels down the left of the waveform.
+    if (wide)
+    {
+        g.setFont (monoFont (8.5f));
+        g.setColour (haze.withAlpha (0.7f));
+
+        for (const auto& [amplitude, name] : std::initializer_list<std::pair<float, const char*>> { { 0.5f, "-6" }, { 1.0f, "0" } })
+            for (const auto side : { -1.0f, 1.0f })
+            {
+                const auto y = onScreen (centre + side * amplitude * reach, 0.0f).y;
+                g.drawText (name, Rectangle<float> (names.getRight() - 22.0f, y - 6.0f, 20.0f, 12.0f), Justification::centredRight, false);
+            }
+    }
 
     //==============================================================================
     // The figures: the highest sample of each side since the reset, then
@@ -240,7 +293,10 @@ void WaveformPanel::paint (Graphics& g)
 
     for (auto t = (firstSecond / every + 1) * every; t < firstSecond + seconds; t += every)
     {
-        const auto label = Rectangle<float> (plot.getX() + 2.0f, yOf ((double) t * mtx::kStepsPerSecond) - 12.0f, 30.0f, 11.0f);
+        // Under the waveform on its side, beside it in the column.
+        const auto at = yOf ((double) t * mtx::kStepsPerSecond);
+        const auto label = wide ? Rectangle<float> (onScreen (frame.getX(), at).x - 20.0f, plot.getBottom() + 3.0f, 40.0f, 11.0f)
+                                : Rectangle<float> (plot.getX() + 2.0f, at - 12.0f, 30.0f, 11.0f);
 
         g.setColour (haze);
         g.drawText (clockText (t), label, Justification::centred, false);

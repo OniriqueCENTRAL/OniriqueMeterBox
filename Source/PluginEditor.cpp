@@ -674,12 +674,9 @@ void MeterBoxEditor::resized()
         for (int t = 0; t < kNumTools; ++t)
             tool (t)->setBounds (body);
 
-        // Some read better narrower than the whole window: the bars of the
-        // loudness, the column of the waveform.
+        // The bars of the loudness read better narrower than the whole window.
         if (processor.getFocusTool() == (int) Tool::loudness)
             loudness.setBounds (body.withSizeKeepingCentre (jmin (body.getWidth(), 640), body.getHeight()));
-        else if (processor.getFocusTool() == (int) Tool::waveform)
-            waveform.setBounds (body.withSizeKeepingCentre (jmin (body.getWidth(), 980), body.getHeight()));
 
         return;
     }

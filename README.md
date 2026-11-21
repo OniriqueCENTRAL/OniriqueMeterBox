@@ -159,7 +159,7 @@ History, Spectrum, Waveform, Phase, chacune avec son pictogramme et son chiffre
 principal en direct (intégré, court terme, cible du spectre, true peak,
 corrélation). Un clic sur une tuile affiche cet outil seul ; le bandeau de la
 référence et le pied restent. En grand, la phase met le goniomètre à gauche et
-le reste à droite, la forme d'onde ses chiffres à droite. La vue et l'outil
+le reste à droite ; la forme d'onde se couche, le temps de gauche à droite, la gauche au-dessus du milieu et la droite en dessous, ses chiffres à droite. La vue et l'outil
 choisis sont gardés avec le projet.
 
 ### Loudness

@@ -9,6 +9,8 @@
 //   meterbox_snapshot out.png --reference   with a reference loaded (louder, brighter, wider), its figures beside the mix's
 //   meterbox_snapshot out.png --listen      the same, the reference being listened to (B)
 //   meterbox_snapshot out.png --rest        at rest, as the shop shows it: nothing played, the licence badge on
+//   meterbox_snapshot out.png --focus N     the simplified view, tool N (0 loudness .. 4 phase)
+//   meterbox_snapshot out.png --login       with the login to the CLOUD open
 //   meterbox_snapshot out.png --find TEXT   searches as the strip does, and shows what it found (the first is then loaded)
 //   meterbox_snapshot out.png --link URL    the reference fetched from a platform by the Downloader of the site
 //   meterbox_snapshot --selftest            the plugin as a host drives it, without a window
@@ -118,8 +120,9 @@ void play (onirique::MeterBoxProcessor& processor, const std::vector<float>& lef
 struct Director final : juce::Timer
 {
     Director (juce::File destination, bool outOfPhase, bool withLicence, bool timed, int width, int height,
-              bool withReference, bool listen, juce::String link, bool atRest, juce::String find = {})
-        : file (std::move (destination)), bench (timed), listening (listen), rest (atRest)
+              bool withReference, bool listen, juce::String link, bool atRest, juce::String find = {},
+              int focus = -1, bool login = false)
+        : file (std::move (destination)), bench (timed), listening (listen), rest (atRest), focusTool (focus), showLogin (login)
     {
         if (find.isNotEmpty())
         {
@@ -169,7 +172,18 @@ struct Director final : juce::Timer
             processor->setNonRealtime (false);
         }
 
+        if (focusTool >= 0)
+        {
+            processor->setFocusView (true);
+            processor->setFocusTool (focusTool);
+        }
+
         editor.reset (processor->createEditor());
+
+        if (showLogin)
+            for (auto* child : editor->getChildren())
+                if (auto* panel = dynamic_cast<onirique::CloudLogin*> (child))
+                    panel->open();
         editor->setSize (width, height);
 
         if (! withLicence && ! rest)
@@ -249,6 +263,8 @@ struct Director final : juce::Timer
 
     juce::File file;
     bool bench = false, listening = false, rest = false;
+    int focusTool = -1;
+    bool showLogin = false;
     juce::Array<onirique::ReferencePlayer::Found> found;
     std::unique_ptr<onirique::MeterBoxProcessor> processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
@@ -601,6 +617,15 @@ int main (int argc, char** argv)
     const auto atRest = arguments.contains ("--rest");
     arguments.removeString ("--rest");
     juce::String link, find;
+    int focus = -1;
+    const auto login = arguments.contains ("--login");
+    arguments.removeString ("--login");
+
+    if (const auto at = arguments.indexOf ("--focus"); at >= 0)
+    {
+        focus = arguments[at + 1].getIntValue();
+        arguments.removeRange (at, 2);
+    }
 
     if (const auto at = arguments.indexOf ("--find"); at >= 0)
     {
@@ -625,7 +650,7 @@ int main (int argc, char** argv)
     const auto height = arguments.size() > 2 ? arguments[2].getIntValue() : 780;
 
     {
-        Director director (file, outOfPhase, withLicence, bench, width, height, withReference, listen, link, atRest, find);
+        Director director (file, outOfPhase, withLicence, bench, width, height, withReference, listen, link, atRest, find, focus, login);
         juce::MessageManager::getInstance()->runDispatchLoop();
     }
 

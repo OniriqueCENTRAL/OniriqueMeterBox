@@ -13,6 +13,8 @@ namespace
     const Identifier kReferenceMatchProperty ("referenceMatch");
     const Identifier kReferenceLockProperty ("referenceLock");
     const Identifier kReferenceOffsetProperty ("referenceOffset");
+    const Identifier kFocusProperty ("focusView");
+    const Identifier kFocusToolProperty ("focusTool");
 
     float parseNumber (const String& text)
     {
@@ -340,6 +342,13 @@ void MeterBoxProcessor::loadReferencePreview (const ReferencePlayer::Found& foun
     referencePlayer.loadPreview (found);
 }
 
+void MeterBoxProcessor::loadReferenceCloud (const cloud::Track& track)
+{
+    adoptShape.store (true);
+    referencePlayer.setOffset (0.0);
+    referencePlayer.loadCloud (track);
+}
+
 void MeterBoxProcessor::handleAsyncUpdate()
 {
     // A reference has just been measured. Chosen by hand, its shape becomes
@@ -394,6 +403,8 @@ void MeterBoxProcessor::getStateInformation (MemoryBlock& destination)
     state.setProperty (kReferenceMatchProperty, referencePlayer.isMatching(), nullptr);
     state.setProperty (kReferenceLockProperty, referencePlayer.isLocked(), nullptr);
     state.setProperty (kReferenceOffsetProperty, referencePlayer.getOffset(), nullptr);
+    state.setProperty (kFocusProperty, focusView, nullptr);
+    state.setProperty (kFocusToolProperty, focusTool, nullptr);
 
     if (const auto xml = state.createXml())
         copyXmlToBinary (*xml, destination);
@@ -429,6 +440,8 @@ void MeterBoxProcessor::setStateInformation (const void* data, int sizeInBytes)
     referencePlayer.setMatching ((bool) state.getProperty (kReferenceMatchProperty, true));
     referencePlayer.setLocked ((bool) state.getProperty (kReferenceLockProperty, true));
     referencePlayer.setOffset ((double) state.getProperty (kReferenceOffsetProperty, 0.0));
+    focusView = (bool) state.getProperty (kFocusProperty, false);
+    focusTool = jlimit (0, 4, (int) state.getProperty (kFocusToolProperty, 0));
 
     const auto path = state.getProperty (kReferenceFileProperty).toString();
     const auto current = referencePlayer.getTrack();
@@ -446,6 +459,8 @@ void MeterBoxProcessor::setStateInformation (const void* data, int sizeInBytes)
     state.removeProperty (kReferenceMatchProperty, nullptr);
     state.removeProperty (kReferenceLockProperty, nullptr);
     state.removeProperty (kReferenceOffsetProperty, nullptr);
+    state.removeProperty (kFocusProperty, nullptr);
+    state.removeProperty (kFocusToolProperty, nullptr);
 
     presets.readState (state);   // l'autre côté A/B
     apvts.replaceState (state);

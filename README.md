@@ -55,6 +55,8 @@ build/Release/meterbox_snapshot.exe snapshot.png --bench     # et le temps que p
 build/Release/meterbox_snapshot.exe ref.png --reference      # avec une référence chargée (--listen : écoutée, sur B)
 build/Release/meterbox_snapshot.exe find.png --find "titre"  # une vraie recherche, ses résultats, et le premier chargé
 build/Release/meterbox_snapshot.exe shop.png --rest          # au repos, comme la boutique le montre
+build/Release/meterbox_snapshot.exe focus.png --focus 2      # la vue simplifiée, sur un outil (0 loudness .. 4 phase)
+build/Release/meterbox_snapshot.exe login.png --login        # avec la connexion au CLOUD ouverte
 build/Release/meterbox_snapshot.exe --selftest               # le plugin comme un hôte le pilote
 ```
 
@@ -124,7 +126,19 @@ Le bandeau au-dessus du pied compare le mix à un titre de référence.
   fin, elle se tait. Éteint, elle avance toute seule quand le DAW joue, en
   boucle, et un clic choisit où elle joue. Lock et décalage sont gardés avec le
   projet.
-- Ce qui est chargé (fichier, recherche, lien) **remplace** la référence en
+- **Cloud** : la référence prise dans l'ONIRIQUE CLOUD, en entier, comme
+  « Référence depuis mon CLOUD » sur la page du site. La première fois, une
+  connexion au compte ONIRIQUE (e-mail, mot de passe, et le code de
+  l'application d'authentification si le compte en a une) :
+  `POST /api/auth/login`. La session est gardée dans
+  `~/Library/Onirique/meterbox-cloud-session` (Mac, lisible par l'utilisateur
+  seul) ou `AppData\Roaming\Onirique\meterbox-cloud-session` (Windows) ; le
+  mot de passe n'est jamais gardé. Ensuite la liste des sons
+  (`GET /api/me/sounds`), projet par projet, à leur version en avant, avec la
+  pochette du projet ; un clic télécharge le son entier par son adresse signée
+  et le charge. « Se déconnecter » en haut de la liste. Une session finie
+  ramène à la connexion.
+- Ce qui est chargé (fichier, recherche, lien, CLOUD) **remplace** la référence en
   place dès qu'il est prêt : il n'y a pas de bouton pour l'enlever.
 
 Les mesures restent celles du mix, même sur B. Les chiffres de la référence,
@@ -135,6 +149,18 @@ l'historique ; sa moyenne dans le spectre, posée sur celle du mix ; sa crête,
 son RMS et son facteur de crête sous la forme d'onde ; sa corrélation, sa
 balance, sa largeur, sa perte en mono et sa corrélation par fréquence dans la
 phase.
+
+### Full / Focus
+
+En haut à droite des mesures (dans l'en-tête de Phase en Full) : **Full**
+montre tous les outils à la fois, **Focus** un seul, en grand. En Focus, une
+rangée de cinq tuiles en haut, comme les modules de VOCALBOX : Loudness,
+History, Spectrum, Waveform, Phase, chacune avec son pictogramme et son chiffre
+principal en direct (intégré, court terme, cible du spectre, true peak,
+corrélation). Un clic sur une tuile affiche cet outil seul ; le bandeau de la
+référence et le pied restent. En grand, la phase met le goniomètre à gauche et
+le reste à droite, la forme d'onde ses chiffres à droite. La vue et l'outil
+choisis sont gardés avec le projet.
 
 ### Loudness
 
@@ -243,6 +269,7 @@ moyenne du spectre couvre tout le fichier, comme le loudness.
 | `Source/dsp/Tonal.*` | Les cibles de balance tonale et leur comparaison. |
 | `Source/dsp/Meter.*` | Le tout, et son passage du thread audio à l'écran : historique, goniomètre. |
 | `Source/PluginProcessor.*` | Réglages, transport, normes, référence capturée, état. |
+| `Source/Cloud.*` | Le compte ONIRIQUE : connexion, session, sons du CLOUD. |
 | `Source/Reference.*` | La référence A/B : lecture du fichier, mesure sur tout le titre, lecture à la place du mix, match de loudness. |
 | `Source/PluginEditor.*`, `Source/ui/` | Interface : thème de la gamme, et un fichier par partie de la fenêtre. |
 | `License/` | La licence commune à la gamme, copiée telle quelle de `plugin-license/` du dépôt ONIRIQUE CENTRAL. |

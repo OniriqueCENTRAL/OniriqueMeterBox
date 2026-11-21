@@ -3,6 +3,7 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include "Cloud.h"
 #include "dsp/Meter.h"
 
 namespace onirique
@@ -86,6 +87,10 @@ public:
         site, kept on this computer, then loaded as a file. */
     void loadPreview (const Found&);
 
+    /** A track of the ONIRIQUE CLOUD, whole, at its version in front: fetched
+        from its signed address, kept on this computer, then loaded as a file. */
+    void loadCloud (const cloud::Track&);
+
     /** Whether a link is one the Downloader of the site takes. */
     static bool isPlatformLink (const String&);
 
@@ -158,6 +163,7 @@ private:
     std::shared_ptr<ReferenceTrack> read (const File&, String& error);
     File download (const String& link, String& error);
     File downloadPreview (const String& id, const String& name, String& error);
+    File downloadCloud (const String& url, const String& name, const String& extension, String& error);
     static File keep (InputStream&, const String& name, const String& extension, String& error, Thread*);
     void install (std::shared_ptr<const ReferenceTrack>);
 
@@ -168,7 +174,7 @@ private:
 
     CriticalSection requestLock;
     File requested;
-    String requestedLink, requestedName;
+    String requestedLink, requestedName, requestedExtension;
     String error;
 
     std::atomic<Status> status { Status::empty };

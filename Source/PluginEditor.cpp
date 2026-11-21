@@ -102,7 +102,18 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     addAndMakeVisible (phase);
     addAndMakeVisible (waveform);
     addAndMakeVisible (referenceStrip);
+
+    // FULL / FOCUS, as the project left it.
+    viewSwitch.setFocus (processor.isFocusView());
+    viewSwitch.onChange = [this] (bool focus) { processor.setFocusView (focus); applyView(); };
+    addAndMakeVisible (viewSwitch);
+
+    focusTabs.setSelected (processor.getFocusTool());
+    focusTabs.readout = [this] (int t) { return readoutOf (t); };
+    focusTabs.onSelect = [this] (int t) { processor.setFocusTool (t); applyView(); };
+    addChildComponent (focusTabs);
     addChildComponent (referenceStrip.results);
+    addChildComponent (referenceStrip.login);
 
     // When it measures.
     syncButton.setClickingTogglesState (true);
@@ -149,6 +160,9 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     describe ({ &referenceStrip.switchZone }, "A/B : A, tu écoutes ton mix ; B, la référence, à sa place. Le passage de l'un à l'autre est fondu, sans clic. Les mesures restent celles du mix, et les chiffres de la référence s'affichent à côté, en bleu, dans chaque partie de la fenêtre. À l'export, c'est toujours le mix qui sort.");
     describe ({ &referenceStrip.trackZone }, "La référence : glisse un fichier audio ici (ou n'importe où sur la fenêtre), ou clique pour en chercher un (WAV, AIFF, FLAC, MP3, OGG ; M4A et AAC sur Mac). Avec Lock, elle joue au temps du projet (clique sur sa forme d'onde pour la décaler, double-clique pour revenir à zéro) ; sans, elle avance avec la lecture du DAW, en boucle, et un clic choisit où elle joue. Ce que tu charges remplace la référence en place. À droite, son loudness intégré, son true peak, sa plage et sa durée, mesurés sur tout le titre. Elle est gardée avec le projet. Un lien YouTube ou TikTok glissé depuis le navigateur marche aussi.");
     describe ({ &referenceStrip.searchButton }, "Search : chercher la référence par son titre, son artiste ou un lien Spotify, comme sur la page « Comparer à une référence » du site : un clic sur un résultat prend son extrait officiel de 30 s (Deezer, en MP3 : l'air au-dessus de 16 kHz y est coupé). Un lien YouTube ou TikTok donne le titre entier, récupéré en WAV par le Downloader du site (un lien par minute sans le rôle ONIRIQUE). Ce qui est chargé remplace la référence en place.");
+    describe ({ &viewSwitch }, "Full / Focus : Full montre tous les outils à la fois. Focus n'en montre qu'un, en grand : choisis-le dans la rangée du haut (Loudness, History, Spectrum, Waveform, Phase), comme les modules de VOCALBOX. La référence et le pied restent là. Le choix est gardé avec le projet.");
+    describe ({ &focusTabs }, "Les outils : clique sur l'un d'eux pour l'afficher seul, en grand. Sous chaque nom, son chiffre principal en direct : le loudness intégré, le court terme, la cible du spectre, le true peak, la corrélation.");
+    describe ({ &referenceStrip.cloudButton }, "Cloud : prendre la référence dans ton ONIRIQUE CLOUD, en entier, comme « Référence depuis mon CLOUD » sur le site. La première fois, connecte-toi avec l'e-mail et le mot de passe de ton compte ONIRIQUE (et le code de ton application d'authentification si tu l'as activée) : la session reste sur cet ordinateur, pas le mot de passe. Ensuite, la liste de tes sons, projet par projet, à leur version en avant ; un clic charge le son entier, qui remplace la référence en place. « Se déconnecter » en haut de la liste.");
     describe ({ &referenceStrip.lockButton }, "Lock : la référence joue au temps du projet. La seconde 72 de ton son est la seconde 72 de la référence, où que tu sois dans le DAW : deux versions du même son restent calées. Clique sur sa forme d'onde pour la décaler par rapport au projet, double-clique pour revenir à zéro. Éteint, elle avance toute seule et boucle.");
     describe ({ &referenceStrip.matchButton }, "Match : la référence est jouée au loudness intégré de ton mix, pour comparer le son et pas le volume. À côté, le gain qui lui est appliqué. Éteint, elle est jouée telle quelle.");
     describe ({ &referenceStrip.loadButton }, "Load : choisir un fichier de référence, qui remplace celui en place. Sa balance tonale devient la cible Reference du spectre.");
@@ -176,6 +190,7 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     const auto opening = onirique::window::openingSize ({}, "ONIRIQUE METERBOX", { 1400, 780 }, { 1220, 660 }, { 2400, 1400 });
     setSize (opening.x, opening.y);
 
+    applyView();
     timerCallback();
     startTimerHz (30);
 }
@@ -184,6 +199,57 @@ MeterBoxEditor::~MeterBoxEditor()
 {
     onirique::window::rememberOnThisComputer ("ONIRIQUE METERBOX", getWidth(), getHeight());
     setLookAndFeel (nullptr);
+}
+
+Component* MeterBoxEditor::tool (int index) noexcept
+{
+    Component* tools[kNumTools] = { &loudness, &history, &spectrum, &waveform, &phase };
+    return tools[jlimit (0, kNumTools - 1, index)];
+}
+
+String MeterBoxEditor::readoutOf (int t) const
+{
+    const auto& meter = processor.getMeter();
+    const auto values = meter.loudness();
+
+    switch (t)
+    {
+        case (int) Tool::loudness:
+            return values.integrated > mtx::kFloorDb + 1.0f ? String (values.integrated, 1) + " LUFS" : String ("-- LUFS");
+
+        case (int) Tool::history:
+            return "ST " + (values.shortTerm > -70.0f ? String (values.shortTerm, 1) : String ("--"));
+
+        case (int) Tool::spectrum:
+            return processor.apvts.getParameter ("tonal")->getCurrentValueAsText();
+
+        case (int) Tool::waveform:
+        {
+            const auto peak = jmax (values.truePeak[0], values.truePeak[1]);
+            return "TP " + (peak > mtx::kFloorDb + 1.0f ? String (peak, 1) : String ("--"));
+        }
+
+        default:
+        {
+            const auto stereo = meter.stereo();
+            return stereo.level > -80.0f ? (stereo.correlation >= 0.0f ? "+" : "") + String (stereo.correlation, 2) : String ("--");
+        }
+    }
+}
+
+void MeterBoxEditor::applyView()
+{
+    const auto focus = processor.isFocusView();
+
+    viewSwitch.setFocus (focus);
+    focusTabs.setSelected (processor.getFocusTool());
+    focusTabs.setVisible (focus);
+
+    for (int t = 0; t < kNumTools; ++t)
+        tool (t)->setVisible (! focus || t == processor.getFocusTool());
+
+    resized();
+    repaint();
 }
 
 bool MeterBoxEditor::isInterestedInFileDrag (const StringArray& files)
@@ -267,6 +333,9 @@ void MeterBoxEditor::timerCallback()
 
     loudness.refresh();
     referenceStrip.refresh();
+
+    if (focusTabs.isVisible())
+        focusTabs.tick();
     spectrum.refresh (frame);
     phase.refresh (frame);
 
@@ -583,11 +652,39 @@ void MeterBoxEditor::resized()
         const auto over = referenceStrip.getTrackArea().translated (referenceStrip.getX(), referenceStrip.getY());
         const auto height = referenceStrip.results.wantedHeight();
         referenceStrip.results.setBounds (over.getX(), over.getY() - 6 - height, jmax (420, over.getWidth()), height);
+        referenceStrip.login.setBounds (over.getX(), over.getY() - 6 - CloudLogin::kHeight, jmax (520, over.getWidth()), CloudLogin::kHeight);
     }
 
 
-    // Four columns: the loudness, the two graphs, the waveform, the phase.
     auto body = bounds.reduced (14, kGap);
+
+    // FOCUS: the row of tools at the top, FULL / FOCUS at its end, and the
+    // chosen tool alone under it, as large as the window allows.
+    if (processor.isFocusView())
+    {
+        auto row = body.removeFromTop (78);
+        viewSwitch.setBounds (row.removeFromRight (150).withSizeKeepingCentre (150, 26));
+        row.removeFromRight (16);
+        focusTabs.setBounds (row);
+
+        body.removeFromTop (kGap);
+        rules.push_back (Rectangle<float> ((float) body.getX(), (float) body.getY(), (float) body.getWidth(), 1.0f));
+        body.removeFromTop (kGap);
+
+        for (int t = 0; t < kNumTools; ++t)
+            tool (t)->setBounds (body);
+
+        // Some read better narrower than the whole window: the bars of the
+        // loudness, the column of the waveform.
+        if (processor.getFocusTool() == (int) Tool::loudness)
+            loudness.setBounds (body.withSizeKeepingCentre (jmin (body.getWidth(), 640), body.getHeight()));
+        else if (processor.getFocusTool() == (int) Tool::waveform)
+            waveform.setBounds (body.withSizeKeepingCentre (jmin (body.getWidth(), 980), body.getHeight()));
+
+        return;
+    }
+
+    // FULL: four columns, the loudness, the two graphs, the waveform, the phase.
 
     // Between two columns, a hairline in the middle of the gap.
     auto columnRule = [this, &body] (int x)
@@ -609,6 +706,9 @@ void MeterBoxEditor::resized()
     rules.push_back (Rectangle<float> ((float) body.getX(), (float) body.getY() + (float) kGap, (float) body.getWidth(), 1.0f));
     body.removeFromTop (2 * kGap);
     spectrum.setBounds (body);
+
+    // FULL / FOCUS in the header of the phase, at its right: nothing else is there.
+    viewSwitch.setBounds (phase.getBounds().withHeight (kPanelHeading).removeFromRight (140).withSizeKeepingCentre (140, 22).translated (0, 2));
 }
 
 } // namespace onirique

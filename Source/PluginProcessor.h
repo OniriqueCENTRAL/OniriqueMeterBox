@@ -108,6 +108,16 @@ public:
         An MP3 extract has no air above 16 kHz: its shape is not taken as the target. */
     void loadReferencePreview (const ReferencePlayer::Found&);
 
+    /** The same from a track of the ONIRIQUE CLOUD, whole: its shape becomes the target. */
+    void loadReferenceCloud (const cloud::Track&);
+
+    /** The simplified view: one tool at a time (FOCUS), and which. Kept
+        with the project. Message thread. */
+    bool isFocusView() const noexcept { return focusView; }
+    void setFocusView (bool shouldFocus) noexcept { focusView = shouldFocus; }
+    int getFocusTool() const noexcept { return focusTool; }
+    void setFocusTool (int tool) noexcept { focusTool = tool; }
+
     AudioProcessorValueTreeState apvts;
 
 
@@ -139,6 +149,9 @@ private:
     ReferencePlayer referencePlayer;
     std::atomic<bool> adoptShape { false };     // the next reference loaded becomes the tonal target
     std::shared_ptr<const ReferenceTrack> adopted;
+
+    bool focusView = false;
+    int focusTool = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MeterBoxProcessor)
 };

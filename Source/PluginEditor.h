@@ -9,6 +9,7 @@
 #include "License/LicenseOverlay.h"
 #include "PluginProcessor.h"
 #include "ui/Controls.h"
+#include "ui/FocusTabs.h"
 #include "ui/HistoryGraph.h"
 #include "ui/LoudnessPanel.h"
 #include "ui/PhasePanel.h"
@@ -85,6 +86,15 @@ private:
     PhasePanel phase;
     WaveformPanel waveform;
     ReferenceStrip referenceStrip;
+
+    // The simplified view: FULL / FOCUS, and the row of tools to focus on.
+    ViewSwitch viewSwitch;
+    FocusTabs focusTabs;
+
+    /** The parts of the window, in the order of the tools. */
+    Component* tool (int index) noexcept;
+    String readoutOf (int tool) const;
+    void applyView();
     mtx::SpectrumFrame frame;
 
     /** The hairlines that part the columns: everything else stands on the ground itself. */

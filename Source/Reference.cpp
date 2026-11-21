@@ -24,6 +24,7 @@ namespace
 
     // A request for an extract, told apart from a link in the queue of the loader.
     const char* const kPreviewPrefix = "preview:";
+    const char* const kCloudPrefix = "cloud:";
 
     // Under this, the mix is too quiet to be matched against.
     constexpr float kQuietestMixLufs = -70.0f;
@@ -106,6 +107,30 @@ void ReferencePlayer::loadPreview (const Found& found)
         requested = File();
         requestedLink = kPreviewPrefix + found.id;
         requestedName = found.artist + String::fromUTF8 (" – ") + found.title + String::fromUTF8 (" (extrait 30 s)");
+        error = {};
+    }
+
+    status.store (Status::downloading, std::memory_order_release);
+
+    if (! isThreadRunning())
+        startThread (Priority::low);
+    else
+        notify();
+}
+
+void ReferencePlayer::loadCloud (const cloud::Track& track)
+{
+    auto extension = File::createFileWithoutCheckingPath ("/" + track.filename).getFileExtension().toLowerCase();
+
+    if (extension.isEmpty() || extension.length() > 6)
+        extension = ".wav";
+
+    {
+        const ScopedLock lock (requestLock);
+        requested = File();
+        requestedLink = kCloudPrefix + track.url;
+        requestedName = track.title.isNotEmpty() ? track.title : File::createFileWithoutCheckingPath ("/" + track.filename).getFileNameWithoutExtension();
+        requestedExtension = extension;
         error = {};
     }
 
@@ -231,13 +256,14 @@ void ReferencePlayer::run()
     while (! threadShouldExit())
     {
         File file;
-        String link, name;
+        String link, name, extension;
 
         {
             const ScopedLock lock (requestLock);
             std::swap (file, requested);
             std::swap (link, requestedLink);
             std::swap (name, requestedName);
+            std::swap (extension, requestedExtension);
         }
 
         if (file == File() && link.isEmpty())
@@ -252,6 +278,7 @@ void ReferencePlayer::run()
         if (link.isNotEmpty())
         {
             file = link.startsWith (kPreviewPrefix) ? downloadPreview (link.fromFirstOccurrenceOf (kPreviewPrefix, false, false), name, problem)
+                 : link.startsWith (kCloudPrefix)   ? downloadCloud (link.fromFirstOccurrenceOf (kCloudPrefix, false, false), name, extension, problem)
                                                     : download (link, problem);
 
             const ScopedLock lock (requestLock);
@@ -356,6 +383,35 @@ File ReferencePlayer::downloadPreview (const String& id, const String& name, Str
     }
 
     return keep (*stream, name.isNotEmpty() ? name : String ("Reference"), ".mp3", problem, this);
+}
+
+File ReferencePlayer::downloadCloud (const String& url, const String& name, const String& extension, String& problem)
+{
+    // The address is signed by the site for a few hours: no session is needed to read it.
+    if (! url.startsWith (cloud::kSite))
+    {
+        problem = String::fromUTF8 ("Adresse du CLOUD inattendue.");
+        return {};
+    }
+
+    int statusCode = 0;
+    auto stream = URL (url).createInputStream (URL::InputStreamOptions (URL::ParameterHandling::inAddress)
+                                                   .withConnectionTimeoutMs (60000)
+                                                   .withStatusCode (&statusCode));
+
+    if (stream == nullptr)
+    {
+        problem = String::fromUTF8 ("Impossible de joindre le site ONIRIQUE : vérifie ta connexion.");
+        return {};
+    }
+
+    if (statusCode != 200)
+    {
+        problem = String::fromUTF8 ("Le son n'a pas pu être lu : rouvre la liste de ton CLOUD.");
+        return {};
+    }
+
+    return keep (*stream, name + String::fromUTF8 (" (CLOUD)"), extension, problem, this);
 }
 
 File ReferencePlayer::keep (InputStream& stream, const String& name, const String& extension, String& problem, Thread* thread)

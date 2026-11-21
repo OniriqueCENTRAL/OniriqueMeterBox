@@ -87,8 +87,10 @@ juce_add_binary_data(MeterBoxAssets SOURCES Resources/sigil.png)
 target_sources(OniriqueMeterBox PRIVATE
     Source/PluginProcessor.cpp
     Source/Reference.cpp
+    Source/Cloud.cpp
     Source/PluginEditor.cpp
     Source/ui/ReferenceStrip.cpp
+    Source/ui/FocusTabs.cpp
     Source/ui/HistoryGraph.cpp
     Source/ui/LoudnessPanel.cpp
     Source/ui/PhasePanel.cpp

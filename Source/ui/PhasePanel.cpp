@@ -135,14 +135,18 @@ void PhasePanel::paint (Graphics& g)
 
     const auto audible = values.level > kAudibleDb;
     const auto ref = processor.getReference().getTrack();
+    const auto wide = getWidth() > getHeight() * 1.6f;
     auto area = getLocalBounds().toFloat().withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
 
     //==============================================================================
     // The goniometer: a square, as large as the panel is wide, as long as
     // it leaves room for the rest.
     {
-        const auto side = jmin (area.getWidth(), jmax (120.0f, area.getHeight() - 250.0f));
-        const auto square = area.removeFromTop (side).withSizeKeepingCentre (side, side);
+        // Wide (the simplified view), the goniometer at the left, as tall as
+        // the panel, and the rest beside it; narrow, one above the other.
+        const auto side = wide ? jmin (area.getHeight(), area.getWidth() * 0.45f)
+                               : jmin (area.getWidth(), jmax (120.0f, area.getHeight() - 250.0f));
+        const auto square = (wide ? area.removeFromLeft (side) : area.removeFromTop (side)).withSizeKeepingCentre (side, side);
         const auto centre = square.getCentre();
         const auto half = side * 0.5f;
 
@@ -176,7 +180,10 @@ void PhasePanel::paint (Graphics& g)
         g.drawText ("-S", Rectangle<float> (24.0f, 12.0f).withCentre ({ square.getX() + 16.0f, centre.y - 9.0f }), Justification::centred, false);
     }
 
-    area.removeFromTop (12.0f);
+    if (wide)
+        area.removeFromLeft (32.0f);
+    else
+        area.removeFromTop (12.0f);
 
     //==============================================================================
     // The correlation: a bar from -1 to +1, filled from the middle.

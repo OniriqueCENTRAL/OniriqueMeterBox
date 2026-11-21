@@ -1,5 +1,7 @@
 #include "ReferenceStrip.h"
 
+#include <map>
+
 namespace onirique
 {
 
@@ -24,11 +26,16 @@ namespace
 }
 
 //==============================================================================
-void SearchResults::show (const Array<ReferencePlayer::Found>& titles, const String& text)
+void SearchResults::show (const Array<ReferencePlayer::Found>& titles, const String& text,
+                          const String& listHeading, const String& listAction)
 {
     found = titles;
     covers.assign ((size_t) titles.size(), Image());
     message = text;
+    first = 0;
+    heading = listHeading.isNotEmpty() ? listHeading : String::fromUTF8 ("RÉSULTATS  ·  EXTRAITS OFFICIELS DE 30 S");
+    action = listAction;
+    actionHover = false;
     hover = -1;
     setVisible (true);
     toFront (false);
@@ -62,18 +69,49 @@ void SearchResults::clear()
 
 int SearchResults::wantedHeight() const
 {
-    return kHeading + jmax (1, found.size()) * kRow + 10;
+    // No higher than the graphs: a long CLOUD is cut at ten rows.
+    return kHeading + jlimit (1, 10, found.size()) * kRow + 10;
+}
+
+Rectangle<int> SearchResults::actionArea() const
+{
+    if (action.isEmpty())
+        return {};
+
+    const auto width = roundToInt (GlyphArrangement::getStringWidth (theme::capsFont (9.0f).withExtraKerningFactor (0.25f), action)) + 24;
+    return { getWidth() - 10 - width, 0, width, kHeading };
 }
 
 int SearchResults::rowAt (int y) const
 {
-    const auto row = (y - kHeading) / kRow;
-    return y >= kHeading && isPositiveAndBelow (row, found.size()) ? row : -1;
+    const auto row = first + (y - kHeading) / kRow;
+    return y >= kHeading && isPositiveAndBelow (row, found.size()) && row < first + 10 ? row : -1;
+}
+
+void SearchResults::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& wheel)
+{
+    const auto last = jmax (0, found.size() - 10);
+    const auto next = jlimit (0, last, first + (wheel.deltaY < 0.0f ? 1 : -1) * jmax (1, roundToInt (std::abs (wheel.deltaY) * 8.0f)));
+
+    if (next != first)
+    {
+        first = next;
+        hover = -1;
+        repaint();
+    }
 }
 
 void SearchResults::mouseMove (const MouseEvent& e)
 {
     const auto row = rowAt (e.y);
+    const auto overAction = actionArea().contains (e.getPosition());
+
+    if (overAction != actionHover)
+    {
+        actionHover = overAction;
+        setMouseCursor (overAction ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
+        repaint();
+    }
 
     if (row != hover)
     {
@@ -91,6 +129,14 @@ void SearchResults::mouseExit (const MouseEvent&)
 
 void SearchResults::mouseDown (const MouseEvent& e)
 {
+    if (actionArea().contains (e.getPosition()))
+    {
+        if (onAction != nullptr)
+            onAction();
+
+        return;
+    }
+
     if (const auto row = rowAt (e.y); row >= 0 && onPick != nullptr)
         onPick (found[row]);
 }
@@ -107,21 +153,27 @@ void SearchResults::paint (Graphics& g)
     g.drawRoundedRectangle (box, 12.0f, 1.0f);
 
     auto area = getLocalBounds().reduced (10, 0);
-    auto heading = area.removeFromTop (kHeading);
+    auto headingArea = area.removeFromTop (kHeading);
 
     g.setColour (haze);
     g.setFont (capsFont (9.0f).withExtraKerningFactor (0.25f));
-    g.drawText (String::fromUTF8 ("RÉSULTATS  ·  EXTRAITS OFFICIELS DE 30 S"), heading.withTrimmedLeft (6), Justification::centredLeft, false);
+    g.drawText (heading, headingArea.withTrimmedLeft (6), Justification::centredLeft, false);
+
+    if (action.isNotEmpty())
+    {
+        g.setColour (actionHover ? Colours::white : refInk);
+        g.drawText (action, actionArea().withTrimmedRight (6), Justification::centredRight, false);
+    }
 
     if (found.isEmpty())
     {
-        g.setColour (message.startsWith ("RECHERCHE") ? refInk : mist);
+        g.setColour (message.endsWith (String::fromUTF8 ("…")) ? refInk : mist);
         g.setFont (displayFont (13.0f, false));
         g.drawText (message, area.removeFromTop (kRow), Justification::centred, true);
         return;
     }
 
-    for (int i = 0; i < found.size(); ++i)
+    for (int i = first; i < jmin (first + 10, found.size()); ++i)
     {
         auto row = area.removeFromTop (kRow);
         const auto& f = found.getReference (i);
@@ -169,6 +221,156 @@ void SearchResults::paint (Graphics& g)
 }
 
 //==============================================================================
+CloudLogin::CloudLogin()
+{
+    using namespace theme;
+
+    auto style = [this] (TextEditor& field, const String& hint)
+    {
+        field.setColour (TextEditor::backgroundColourId, Colours::black.withAlpha (0.3f));
+        field.setColour (TextEditor::outlineColourId, Colour (0x30ffd2d6));
+        field.setColour (TextEditor::focusedOutlineColourId, refInk.withAlpha (0.8f));
+        field.setColour (TextEditor::textColourId, Colours::white);
+        field.setFont (displayFont (13.0f, false));
+        field.setTextToShowWhenEmpty (hint, haze);
+        field.setIndents (10, 0);
+        field.setJustification (Justification::centredLeft);
+        field.onReturnKey = [this] { submit(); };
+        field.onEscapeKey = [this] { close(); };
+        field.onTextChange = [this] { problem = {}; repaint(); };
+        addAndMakeVisible (field);
+    };
+
+    style (email, String::fromUTF8 ("E-mail de ton compte ONIRIQUE"));
+    style (password, String::fromUTF8 ("Mot de passe"));
+    style (code, String::fromUTF8 ("Code à 6 chiffres de ton application d'authentification"));
+    password.setPasswordCharacter ((juce_wchar) 0x2022);
+    code.setInputRestrictions (6, "0123456789");
+    code.setVisible (false);
+
+    connect.onClick = [this] { submit(); };
+    addAndMakeVisible (connect);
+    setVisible (false);
+}
+
+void CloudLogin::open()
+{
+    problem = {};
+    password.clear();
+    code.clear();
+    setBusy (false);
+    setVisible (true);
+    toFront (false);
+    email.grabKeyboardFocus();
+    repaint();
+}
+
+void CloudLogin::close()
+{
+    password.clear();
+    code.clear();
+    setVisible (false);
+}
+
+void CloudLogin::fail (const String& why, bool needsCode)
+{
+    problem = why;
+
+    if (needsCode)
+    {
+        code.setVisible (true);
+        code.grabKeyboardFocus();
+    }
+
+    setBusy (false);
+    resized();
+    repaint();
+}
+
+void CloudLogin::setBusy (bool isBusy)
+{
+    busy = isBusy;
+    connect.setEnabled (! busy);
+    connect.setButtonText (busy ? "..." : "CONNECT");
+}
+
+void CloudLogin::submit()
+{
+    if (busy)
+        return;
+
+    if (! email.getText().containsChar ('@') || password.getText().isEmpty())
+    {
+        problem = String::fromUTF8 ("Entre l'e-mail et le mot de passe de ton compte ONIRIQUE.");
+        repaint();
+        return;
+    }
+
+    setBusy (true);
+
+    if (onConnect != nullptr)
+        onConnect (email.getText().trim(), password.getText(), code.getText().trim());
+}
+
+Rectangle<int> CloudLogin::closeArea() const
+{
+    return { getWidth() - 40, 4, 32, 26 };
+}
+
+void CloudLogin::resized()
+{
+    auto area = getLocalBounds().reduced (16, 0);
+    area.removeFromTop (34);
+
+    auto row = area.removeFromTop (34);
+    email.setBounds (row.removeFromLeft (row.getWidth() / 2 - 5));
+    row.removeFromLeft (10);
+    password.setBounds (row);
+    area.removeFromTop (10);
+
+    row = area.removeFromTop (34);
+    connect.setBounds (row.removeFromRight (120).withSizeKeepingCentre (120, 30));
+
+    if (code.isVisible())
+    {
+        row.removeFromRight (10);
+        code.setBounds (row);
+    }
+}
+
+void CloudLogin::mouseDown (const MouseEvent& e)
+{
+    if (closeArea().contains (e.getPosition()))
+        close();
+}
+
+void CloudLogin::paint (Graphics& g)
+{
+    using namespace theme;
+
+    const auto box = getLocalBounds().toFloat().reduced (0.5f);
+
+    g.setGradientFill (ColourGradient (onirique::look::tint (0xfa2a0a0f), 0.0f, 0.0f, onirique::look::tint (0xfa140608), 0.0f, box.getBottom(), false));
+    g.fillRoundedRectangle (box, 12.0f);
+    g.setColour (refInk.withAlpha (0.45f));
+    g.drawRoundedRectangle (box, 12.0f, 1.0f);
+
+    g.setColour (haze);
+    g.setFont (capsFont (9.0f).withExtraKerningFactor (0.25f));
+    g.drawText (String::fromUTF8 ("MON CLOUD  ·  CONNEXION À TON COMPTE ONIRIQUE"), getLocalBounds().reduced (22, 0).withHeight (34),
+                Justification::centredLeft, false);
+    g.drawText (String::fromUTF8 ("×"), closeArea(), Justification::centred, false);
+
+    // Under the fields: why it failed, or what happens to the session.
+    auto note = getLocalBounds().reduced (22, 0).withTrimmedTop (34 + 34 + 10 + 34 + 10);
+    g.setColour (problem.isNotEmpty() ? emberLit : haze);
+    g.setFont (displayFont (12.0f, false));
+    g.drawFittedText (problem.isNotEmpty() ? problem
+                                           : String::fromUTF8 ("Une fois connecté, tu prends tes sons du CLOUD en entier comme référence. La session reste sur cet ordinateur ; ton mot de passe n'y est pas gardé."),
+                      note.removeFromTop (40), Justification::topLeft, 2);
+}
+
+//==============================================================================
 ReferenceStrip::ReferenceStrip (MeterBoxProcessor& p) : processor (p)
 {
     auto& player = processor.getReference();
@@ -191,6 +393,34 @@ ReferenceStrip::ReferenceStrip (MeterBoxProcessor& p) : processor (p)
     searchButton.onClick = [this] { openSearch(); };
     addAndMakeVisible (searchButton);
 
+    cloudButton.getProperties().set ("plain", true);
+    cloudButton.onClick = [this] { openCloud(); };
+    addAndMakeVisible (cloudButton);
+
+    // The login, off the message thread; on success, the list of the CLOUD.
+    login.onConnect = [this] (const String& mail, const String& pass, const String& twoFactor)
+    {
+        Thread::launch ([safe = Component::SafePointer<ReferenceStrip> (this), mail, pass, twoFactor]
+        {
+            const auto result = cloud::login (mail, pass, twoFactor);
+
+            MessageManager::callAsync ([safe, result]
+            {
+                if (safe == nullptr)
+                    return;
+
+                if (! result.ok)
+                {
+                    safe->login.fail (result.error, result.needsCode);
+                    return;
+                }
+
+                safe->login.close();
+                safe->listCloud();
+            });
+        });
+    };
+
     linkField.setColour (TextEditor::backgroundColourId, Colours::transparentBlack);
     linkField.setColour (TextEditor::outlineColourId, Colours::transparentBlack);
     linkField.setColour (TextEditor::focusedOutlineColourId, Colours::transparentBlack);
@@ -205,6 +435,13 @@ ReferenceStrip::ReferenceStrip (MeterBoxProcessor& p) : processor (p)
     addChildComponent (linkField);
 
     results.onPick = [this] (const ReferencePlayer::Found& f) { pick (f); };
+
+    // The word at the right of the CLOUD's list: log out.
+    results.onAction = [this]
+    {
+        closeSearch();
+        Thread::launch ([] { cloud::logout(); });
+    };
     results.setVisible (false);
 
     for (auto* zone : { &switchZone, &trackZone })
@@ -222,6 +459,8 @@ void ReferenceStrip::resized()
     area.removeFromLeft (16);
 
     loadButton.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 26));
+    area.removeFromRight (6);
+    cloudButton.setBounds (area.removeFromRight (68).withSizeKeepingCentre (68, 26));
     area.removeFromRight (6);
     searchButton.setBounds (area.removeFromRight (76).withSizeKeepingCentre (76, 26));
     area.removeFromRight (16);
@@ -296,38 +535,159 @@ void ReferenceStrip::runSearch()
 
         MessageManager::callAsync ([safe, titles, problem, generation]
         {
-            if (safe != nullptr && safe->searchGeneration == generation)
-                safe->results.show (titles, problem);
-        });
+            if (safe == nullptr || safe->searchGeneration != generation)
+                return;
 
-        // The covers, one by one, as they come.
-        for (int i = 0; i < titles.size(); ++i)
+            safe->listingCloud = false;
+            safe->results.show (titles, problem);
+
+            StringArray covers;
+
+            for (const auto& t : titles)
+                covers.add (t.coverUrl);
+
+            safe->showCovers (covers, generation);
+        });
+    });
+}
+
+void ReferenceStrip::showCovers (const StringArray& urls, int generation)
+{
+    // The covers, one by one, as they come, off the message thread; the same
+    // image for every track of a project is fetched once.
+    Thread::launch ([safe = Component::SafePointer<ReferenceStrip> (this), urls, generation]
+    {
+        std::map<String, Image> fetched;
+
+        for (int i = 0; i < urls.size(); ++i)
         {
-            if (titles[i].coverUrl.isEmpty() || ! titles[i].coverUrl.startsWithIgnoreCase ("https://"))
+            const auto& url = urls[i];
+
+            if (! url.startsWithIgnoreCase ("https://"))
                 continue;
 
-            if (auto in = URL (titles[i].coverUrl).createInputStream (URL::InputStreamOptions (URL::ParameterHandling::inAddress)
-                                                                          .withConnectionTimeoutMs (5000)))
+            if (fetched.count (url) == 0)
             {
-                // Read whole first: the JPEG reader does not take a stream from the network.
-                MemoryBlock bytes;
-                in->readIntoMemoryBlock (bytes, 2 * 1024 * 1024);
-                const auto cover = ImageFileFormat::loadFrom (bytes.getData(), bytes.getSize());
+                Image cover;
 
-                MessageManager::callAsync ([safe, cover, i, generation]
+                if (auto in = URL (url).createInputStream (URL::InputStreamOptions (URL::ParameterHandling::inAddress)
+                                                               .withConnectionTimeoutMs (5000)))
                 {
-                    if (safe != nullptr && safe->searchGeneration == generation)
-                        safe->results.setCover (i, cover);
-                });
+                    // Read whole first: the JPEG reader does not take a stream from the network.
+                    MemoryBlock bytes;
+                    in->readIntoMemoryBlock (bytes, 4 * 1024 * 1024);
+                    cover = ImageFileFormat::loadFrom (bytes.getData(), bytes.getSize());
+
+                    // Small, so that a large cover does not weigh on every repaint.
+                    if (cover.isValid() && cover.getWidth() > 120)
+                        cover = cover.rescaled (120, jmax (1, 120 * cover.getHeight() / cover.getWidth()), Graphics::highResamplingQuality);
+                }
+
+                fetched[url] = cover;
             }
+
+            const auto cover = fetched[url];
+
+            if (! cover.isValid())
+                continue;
+
+            MessageManager::callAsync ([safe, cover, i, generation]
+            {
+                if (safe != nullptr && safe->searchGeneration == generation)
+                    safe->results.setCover (i, cover);
+            });
         }
+    });
+}
+
+void ReferenceStrip::openCloud()
+{
+    // Open: closed again.
+    if (listingCloud || login.isVisible())
+    {
+        closeSearch();
+        return;
+    }
+
+    closeSearch();
+
+    if (! cloud::isLoggedIn())
+    {
+        login.open();
+        cloudButton.setToggleState (true, dontSendNotification);
+        return;
+    }
+
+    listCloud();
+}
+
+void ReferenceStrip::listCloud()
+{
+    const auto generation = ++searchGeneration;
+    listingCloud = true;
+    cloudButton.setToggleState (true, dontSendNotification);
+    results.show ({}, String::fromUTF8 ("LECTURE DE TON CLOUD…"), String::fromUTF8 ("MON CLOUD"));
+
+    Thread::launch ([safe = Component::SafePointer<ReferenceStrip> (this), generation]
+    {
+        String problem;
+        bool expired = false;
+        const auto tracks = cloud::tracks (problem, expired);
+
+        MessageManager::callAsync ([safe, tracks, problem, expired, generation]
+        {
+            if (safe == nullptr || safe->searchGeneration != generation)
+                return;
+
+            // The session is over: the login again.
+            if (expired)
+            {
+                safe->results.clear();
+                safe->listingCloud = false;
+                safe->login.open();
+                safe->login.fail (problem, false);
+                return;
+            }
+
+            safe->cloudTracks = tracks;
+
+            // Shown as the search's results are: the project in place of the artist.
+            Array<ReferencePlayer::Found> rows;
+            StringArray covers;
+
+            for (int i = 0; i < tracks.size(); ++i)
+            {
+                ReferencePlayer::Found f;
+                f.id = "cloud:" + String (i);
+                f.title = tracks[i].title;
+                f.artist = tracks[i].project;
+                f.seconds = tracks[i].seconds;
+                rows.add (f);
+                covers.add (tracks[i].coverUrl);
+            }
+
+            const auto count = tracks.size() > 10 ? String::fromUTF8 ("  ·  ") + String (tracks.size()) + String::fromUTF8 (" SONS, FAIS DÉFILER") : String();
+            safe->results.show (rows, problem, String::fromUTF8 ("MON CLOUD  ·  SONS ENTIERS") + count, String::fromUTF8 ("SE DÉCONNECTER"));
+            safe->showCovers (covers, generation);
+        });
     });
 }
 
 void ReferenceStrip::pick (const ReferencePlayer::Found& found)
 {
     // Whatever is in place is replaced, once the new one is ready.
-    processor.loadReferencePreview (found);
+    if (found.id.startsWith ("cloud:"))
+    {
+        const auto index = found.id.fromFirstOccurrenceOf ("cloud:", false, false).getIntValue();
+
+        if (isPositiveAndBelow (index, cloudTracks.size()))
+            processor.loadReferenceCloud (cloudTracks[index]);
+    }
+    else
+    {
+        processor.loadReferencePreview (found);
+    }
+
     closeSearch();
 }
 
@@ -335,6 +695,9 @@ void ReferenceStrip::closeSearch()
 {
     ++searchGeneration;
     results.clear();
+    login.close();
+    listingCloud = false;
+    cloudButton.setToggleState (false, dontSendNotification);
     linkField.setVisible (false);
     linkProblem = {};
     searchButton.setButtonText ("SEARCH");

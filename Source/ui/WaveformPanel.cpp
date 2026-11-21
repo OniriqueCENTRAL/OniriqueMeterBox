@@ -31,9 +31,25 @@ void WaveformPanel::paint (Graphics& g)
     const auto ref = processor.getReference().getTrack();
 
     auto body = getLocalBounds().toFloat().withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
+
+    // Wide (the simplified view), the figures in a column at the right; narrow, under the waveform.
+    const auto wide = getWidth() > 420;
+    Rectangle<float> figures;
+
+    if (wide)
+    {
+        figures = body.removeFromRight (200.0f).withTrimmedTop (14.0f);
+        body.removeFromRight (28.0f);
+    }
+
     const auto names = body.removeFromTop (14.0f);
-    auto figures = body.removeFromBottom ((ref != nullptr ? 9.0f : 6.0f) * 17.0f);
-    body.removeFromBottom (6.0f);
+
+    if (! wide)
+    {
+        figures = body.removeFromBottom ((ref != nullptr ? 9.0f : 6.0f) * 17.0f);
+        body.removeFromBottom (6.0f);
+    }
+
     const auto marks = body.removeFromBottom (11.0f);
     const auto plot = body;
     const auto centre = plot.getCentreX();

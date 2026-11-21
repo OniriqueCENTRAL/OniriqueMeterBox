@@ -20,8 +20,6 @@ namespace
 
 HistoryGraph::HistoryGraph (MeterBoxProcessor& p) : processor (p)
 {
-    setOpaque (true);
-
     spanBox.addItemList (processor.apvts.getParameter ("span")->getAllValueStrings(), 1);
     spanAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (processor.apvts, "span", spanBox);
     addAndMakeVisible (spanBox);
@@ -29,7 +27,7 @@ HistoryGraph::HistoryGraph (MeterBoxProcessor& p) : processor (p)
 
 void HistoryGraph::resized()
 {
-    spanBox.setBounds (getWidth() - 14 - 92, 5, 92, 20);
+    spanBox.setBounds (getWidth() - 92, 5, 92, 20);
 }
 
 void HistoryGraph::paint (Graphics& g)
@@ -40,6 +38,7 @@ void HistoryGraph::paint (Graphics& g)
     const auto target = processor.getTargetLufs();
     const auto ceiling = processor.getCeilingDb();
     const auto top = target + kOver, bottom = target - kUnder;
+    const auto ref = processor.getReference().getTrack();
 
     // The key, after the name.
     {
@@ -66,9 +65,12 @@ void HistoryGraph::paint (Graphics& g)
         entry ("MOMENTARY", ember.withAlpha (0.45f), true);
         entry ("SHORT-TERM", emberLit, false);
         entry ("INTEGRATED", Colours::white, false);
+
+        if (ref != nullptr)
+            entry ("REFERENCE", refInk, false);
     }
 
-    auto body = getLocalBounds().toFloat().reduced (14.0f, 0.0f).withTrimmedTop ((float) kPanelHeading + 6.0f).withTrimmedBottom (20.0f);
+    auto body = getLocalBounds().toFloat().withTrimmedTop ((float) kPanelHeading + 6.0f).withTrimmedBottom (20.0f);
     const auto spread = body.removeFromRight (kSpreadWidth);
     body.removeFromRight (10.0f);
     const auto plot = body;
@@ -207,6 +209,24 @@ void HistoryGraph::paint (Graphics& g)
         g.drawDashedLine ({ plot.getX(), y, spread.getRight(), y }, dashes, 2, 1.0f);
     }
 
+    // The reference's integrated loudness, across the graph and the spread.
+    if (ref != nullptr)
+    {
+        const auto lufs = ref->stats.loudness.integrated;
+
+        if (lufs < top && lufs > bottom)
+        {
+            const auto y = yOf (lufs);
+            const float dashes[] = { 2.0f, 3.0f };
+
+            g.setColour (refInk.withAlpha (0.9f));
+            g.drawDashedLine ({ plot.getX(), y, spread.getRight(), y }, dashes, 2, 1.2f);
+            g.setFont (capsFont (8.5f));
+            g.drawText ("REF " + String (lufs, 1), Rectangle<float> (plot.getRight() - 80.0f, y - 12.0f, 76.0f, 10.0f),
+                        Justification::centredRight, false);
+        }
+    }
+
     // The scale, written over the curves so that it can always be read.
     g.setFont (monoFont (9.0f));
 
@@ -215,8 +235,6 @@ void HistoryGraph::paint (Graphics& g)
         const auto lufs = target + 6.0f * (float) step;
         const auto label = Rectangle<float> (plot.getX() + 2.0f, yOf (lufs) - 12.0f, 30.0f, 11.0f);
 
-        g.setColour (deep.withAlpha (0.75f));
-        g.fillRoundedRectangle (label, 3.0f);
         g.setColour (step == 0 ? mist : haze);
         g.drawText (String (lufs, std::abs (lufs - std::round (lufs)) < 0.05f ? 0 : 1), label, Justification::centred, false);
     }
@@ -229,8 +247,8 @@ void HistoryGraph::paint (Graphics& g)
         for (int bin = 0; bin < mtx::kDistributionBins; ++bin)
             most = jmax (most, meter.distribution (bin));
 
-        g.setColour (Colour (0x40000000));
-        g.fillRoundedRectangle (spread, 5.0f);
+        g.setColour (line);
+        g.fillRect (spread.getX(), spread.getY(), 1.0f, spread.getHeight());
 
         if (most > 0)
         {
@@ -250,6 +268,28 @@ void HistoryGraph::paint (Graphics& g)
 
                 g.setColour (lufs >= target ? emberLit.withAlpha (0.9f) : ember.withAlpha (0.75f));
                 g.fillRect (spread.getX() + 3.0f, y0 + 0.5f, length, jmax (1.0f, y1 - y0 - 1.0f));
+            }
+        }
+
+        // The reference's, as an outline over it.
+        if (ref != nullptr && ref->stats.distributionMost > 0)
+        {
+            Graphics::ScopedSaveState state (g);
+            g.reduceClipRegion (spread.toNearestInt());
+            g.setColour (refInk);
+
+            for (int bin = 0; bin < mtx::kDistributionBins; ++bin)
+            {
+                const auto held = ref->stats.distribution[bin];
+
+                if (held == 0)
+                    continue;
+
+                const auto lufs = mtx::kDistributionFloor + (float) bin;
+                const auto y0 = yOf (lufs + 1.0f), y1 = yOf (lufs);
+                const auto length = jmax (2.0f, (spread.getWidth() - 6.0f) * (float) held / (float) ref->stats.distributionMost);
+
+                g.fillRect (spread.getX() + 3.0f + length - 1.5f, y0, 1.5f, jmax (1.0f, y1 - y0));
             }
         }
     }

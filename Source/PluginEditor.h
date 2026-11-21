@@ -12,6 +12,7 @@
 #include "ui/HistoryGraph.h"
 #include "ui/LoudnessPanel.h"
 #include "ui/PhasePanel.h"
+#include "ui/ReferenceStrip.h"
 #include "ui/SpectrumDisplay.h"
 #include "ui/Theme.h"
 #include "ui/WaveformPanel.h"
@@ -26,6 +27,8 @@ namespace onirique
 
     The header is when it measures; the foot, what it measures against. */
 class MeterBoxEditor final : public AudioProcessorEditor,
+                             public FileDragAndDropTarget,
+                             public TextDragAndDropTarget,
                              private Timer
 {
 public:
@@ -38,6 +41,18 @@ public:
     /** Takes the licence badge and its page away, for a picture of the
         interface alone. */
     void hideLicence();
+
+    // A reference dropped anywhere on the window.
+    bool isInterestedInFileDrag (const StringArray&) override;
+    void fileDragEnter (const StringArray&, int, int) override;
+    void fileDragExit (const StringArray&) override;
+    void filesDropped (const StringArray&, int, int) override;
+
+    // A link to a track on a platform, dragged from the browser.
+    bool isInterestedInTextDrag (const String&) override;
+    void textDragEnter (const String&, int, int) override;
+    void textDragExit (const String&) override;
+    void textDropped (const String&, int, int) override;
 
 private:
     using ButtonAttachment = AudioProcessorValueTreeState::ButtonAttachment;
@@ -69,7 +84,11 @@ private:
     SpectrumDisplay spectrum;
     PhasePanel phase;
     WaveformPanel waveform;
+    ReferenceStrip referenceStrip;
     mtx::SpectrumFrame frame;
+
+    /** The hairlines that part the columns: everything else stands on the ground itself. */
+    std::vector<Rectangle<float>> rules;
     int ticks = 0;
 
     // The header: when it measures.

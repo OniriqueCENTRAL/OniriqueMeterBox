@@ -86,7 +86,9 @@ juce_add_binary_data(MeterBoxAssets SOURCES Resources/sigil.png)
 
 target_sources(OniriqueMeterBox PRIVATE
     Source/PluginProcessor.cpp
+    Source/Reference.cpp
     Source/PluginEditor.cpp
+    Source/ui/ReferenceStrip.cpp
     Source/ui/HistoryGraph.cpp
     Source/ui/LoudnessPanel.cpp
     Source/ui/PhasePanel.cpp
@@ -104,7 +106,9 @@ target_compile_definitions(OniriqueMeterBox PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
-    JUCE_REPORT_APP_USAGE=0)
+    JUCE_REPORT_APP_USAGE=0
+    # A reference can be an MP3 on Windows too.
+    JUCE_USE_MP3AUDIOFORMAT=1)
 
 # The descriptions are in French: the sources are UTF-8, and MSVC has to be told.
 if(MSVC)

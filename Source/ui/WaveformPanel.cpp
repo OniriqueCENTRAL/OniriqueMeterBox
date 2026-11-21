@@ -20,7 +20,6 @@ namespace
 
 WaveformPanel::WaveformPanel (MeterBoxProcessor& p) : processor (p)
 {
-    setOpaque (true);
 }
 
 void WaveformPanel::paint (Graphics& g)
@@ -29,10 +28,11 @@ void WaveformPanel::paint (Graphics& g)
 
     const auto& meter = processor.getMeter();
     const auto ceiling = processor.getCeilingDb();
+    const auto ref = processor.getReference().getTrack();
 
-    auto body = getLocalBounds().toFloat().reduced (10.0f, 0.0f).withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
+    auto body = getLocalBounds().toFloat().withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
     const auto names = body.removeFromTop (14.0f);
-    auto figures = body.removeFromBottom (6.0f * 17.0f);
+    auto figures = body.removeFromBottom ((ref != nullptr ? 9.0f : 6.0f) * 17.0f);
     body.removeFromBottom (6.0f);
     const auto marks = body.removeFromBottom (11.0f);
     const auto plot = body;
@@ -44,8 +44,6 @@ void WaveformPanel::paint (Graphics& g)
     g.drawText ("L", names.withWidth (names.getWidth() * 0.5f), Justification::centred, false);
     g.drawText ("R", names.withTrimmedLeft (names.getWidth() * 0.5f), Justification::centred, false);
 
-    g.setColour (Colour (0x40000000));
-    g.fillRoundedRectangle (plot, 6.0f);
 
     // The grid: the middle, then -12 dB, -6 dB and full scale on each side,
     // the last two named under the waveform.
@@ -209,6 +207,16 @@ void WaveformPanel::paint (Graphics& g)
         row ("RMS R", dbText (rms[1]), mist);
         row ("CREST", loudest > 1.0e-5f ? String (20.0f * std::log10 (jmax (crest[0], crest[1]) / loudest), 1) : String ("--"), mist);
         row ("TIME", clockText (count / mtx::kStepsPerSecond), mist);
+
+        // The reference's, over the whole record.
+        if (ref != nullptr)
+        {
+            const auto& s = ref->stats;
+
+            row ("REF PEAK", dbText (jmax (s.peak[0], s.peak[1])), refInk);
+            row ("REF RMS", dbText (jmax (s.rms[0], s.rms[1])), refInk);
+            row ("REF CREST", String (s.crestDb, 1), refInk);
+        }
     }
 
     // The times, written over the waveform so that they can always be read.
@@ -218,8 +226,6 @@ void WaveformPanel::paint (Graphics& g)
     {
         const auto label = Rectangle<float> (plot.getX() + 2.0f, yOf ((double) t * mtx::kStepsPerSecond) - 12.0f, 30.0f, 11.0f);
 
-        g.setColour (deep.withAlpha (0.75f));
-        g.fillRoundedRectangle (label, 3.0f);
         g.setColour (haze);
         g.drawText (clockText (t), label, Justification::centred, false);
     }

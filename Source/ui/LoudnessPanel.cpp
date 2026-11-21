@@ -21,8 +21,6 @@ namespace
 
 LoudnessPanel::LoudnessPanel (MeterBoxProcessor& p) : processor (p)
 {
-    setOpaque (true);
-
     for (auto& s : shown)
         s = mtx::kFloorDb;
 
@@ -70,13 +68,14 @@ void LoudnessPanel::paint (Graphics& g)
     const auto target = processor.getTargetLufs();
     const auto ceiling = processor.getCeilingDb();
     const auto measured = values.integrated > mtx::kFloorDb + 1.0f;
+    const auto ref = processor.getReference().getTrack();
 
-    auto area = getLocalBounds().toFloat().reduced (14.0f, 0.0f).withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
+    auto area = getLocalBounds().toFloat().withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
 
     //==============================================================================
     // The integrated loudness, large, and how far it is from the target.
     {
-        auto block = area.removeFromTop (86.0f);
+        auto block = area.removeFromTop (ref != nullptr ? 104.0f : 86.0f);
 
         g.setColour (haze);
         g.setFont (capsFont (9.5f));
@@ -110,6 +109,18 @@ void LoudnessPanel::paint (Graphics& g)
             g.setFont (monoFont (11.0f).boldened());
             g.drawText (signedText (away, 1) + " LU", status, Justification::centredRight, false);
         }
+
+        // The reference's, and how far the mix is from it.
+        if (ref != nullptr)
+        {
+            const auto refRow = block.removeFromTop (18.0f);
+            const auto refLufs = ref->stats.loudness.integrated;
+
+            paintReferenceFigure (g, "REF " + String (refLufs, 1), refRow, Justification::centredLeft);
+
+            if (measured)
+                paintReferenceFigure (g, signedText (values.integrated - refLufs, 1) + " LU", refRow);
+        }
     }
 
     area.removeFromTop (6.0f);
@@ -117,10 +128,21 @@ void LoudnessPanel::paint (Graphics& g)
     //==============================================================================
     // The numbers, at the foot.
     {
-        auto rows = area.removeFromBottom (5.0f * 21.0f);
+        auto rows = area.removeFromBottom (5.0f * 21.0f + (ref != nullptr ? 12.0f : 0.0f));
         const auto highest = jmax (values.truePeak[0], values.truePeak[1]);
 
-        auto row = [&] (const String& name, const String& value, const String& extra, Colour valueColour)
+        // Over the reference's column, its name.
+        if (ref != nullptr)
+        {
+            auto caption = rows.removeFromTop (12.0f);
+            caption.removeFromRight (74.0f);
+
+            g.setColour (refInk.withAlpha (0.8f));
+            g.setFont (capsFont (8.0f));
+            g.drawText ("REF", caption.removeFromRight (52.0f), Justification::centredRight, false);
+        }
+
+        auto row = [&] (const String& name, const String& value, const String& refValue, const String& extra, Colour valueColour)
         {
             auto r = rows.removeFromTop (21.0f);
 
@@ -131,16 +153,24 @@ void LoudnessPanel::paint (Graphics& g)
             g.setFont (monoFont (10.5f));
             g.drawText (extra, r.removeFromRight (74.0f), Justification::centredRight, false);
 
+            if (ref != nullptr)
+                paintReferenceFigure (g, refValue, r.removeFromRight (52.0f));
+
             g.setColour (valueColour);
             g.setFont (monoFont (12.5f).boldened());
             g.drawText (value, r, Justification::centredRight, false);
         };
 
-        row ("SHORT-TERM", levelText (values.shortTerm), "MAX " + levelText (values.shortTermMax), mist);
-        row ("MOMENTARY", levelText (values.momentary), "MAX " + levelText (values.momentaryMax), mist);
-        row ("RANGE", measured ? String (values.range, 1) : String ("--"), "LU", mist);
-        row ("TRUE PEAK", levelText (highest), highest > ceiling ? "OVER" : "dBTP", highest > ceiling ? emberLit : mist);
-        row ("PLR", measured ? String (values.peakToLoudness, 1) : String ("--"),
+        // The reference has no "now": beside a level that moves, its highest.
+        const auto none = mtx::LoudnessValues();
+        const auto& r = ref != nullptr ? ref->stats.loudness : none;
+
+        row ("SHORT-TERM", levelText (values.shortTerm), levelText (r.shortTermMax), "MAX " + levelText (values.shortTermMax), mist);
+        row ("MOMENTARY", levelText (values.momentary), levelText (r.momentaryMax), "MAX " + levelText (values.momentaryMax), mist);
+        row ("RANGE", measured ? String (values.range, 1) : String ("--"), String (r.range, 1), "LU", mist);
+        row ("TRUE PEAK", levelText (highest), levelText (jmax (r.truePeak[0], r.truePeak[1])),
+             highest > ceiling ? "OVER" : "dBTP", highest > ceiling ? emberLit : mist);
+        row ("PLR", measured ? String (values.peakToLoudness, 1) : String ("--"), String (r.peakToLoudness, 1),
              "PSR " + (values.shortTerm > -70.0f ? String (values.peakToShort, 1) : String ("--")), mist);
     }
 
@@ -196,7 +226,7 @@ void LoudnessPanel::paint (Graphics& g)
         const auto bar = bars[i];
         const auto limit = i <= peakRight ? ceiling : target;
 
-        g.setColour (Colour (0x59000000));
+        g.setColour (Colours::white.withAlpha (0.03f));
         g.fillRoundedRectangle (bar, 3.0f);
 
         const auto inner = bar.reduced (1.0f);
@@ -227,6 +257,26 @@ void LoudnessPanel::paint (Graphics& g)
         {
             g.setColour (mark > limit ? Colours::white : mist.withAlpha (0.75f));
             g.fillRect (inner.getX(), yOf (mark) - 1.0f, inner.getWidth(), 2.0f);
+        }
+
+        // Where the reference reaches: its true peak, its highest
+        // momentary and short-term loudness, its integrated loudness.
+        if (ref != nullptr)
+        {
+            const auto& r = ref->stats.loudness;
+            const float reached[numBars] = { r.truePeak[0], r.truePeak[1], r.momentaryMax, r.shortTermMax, r.integrated };
+
+            if (reached[i] > kBottomDb)
+            {
+                const auto y = yOf (reached[i]);
+
+                g.setColour (refInk);
+                g.fillRect (inner.getX(), y - 0.75f, inner.getWidth(), 1.5f);
+
+                Path notch;
+                notch.addTriangle (bar.getX() - 0.5f, y, bar.getX() - 4.5f, y - 3.0f, bar.getX() - 4.5f, y + 3.0f);
+                g.fillPath (notch);
+            }
         }
 
         g.setColour (haze);

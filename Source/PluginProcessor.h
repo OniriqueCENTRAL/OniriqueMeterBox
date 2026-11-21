@@ -4,6 +4,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "License/LicenseGuard.h"
+#include "Reference.h"
 #include "dsp/Meter.h"
 #include "ui/OniriquePresets.h"
 
@@ -16,7 +17,8 @@ using namespace juce;
     handed to the meter, which the editor reads. What is kept here is what a
     measurement is held against: a loudness, a ceiling, and the shape the
     spectrum is expected to have. */
-class MeterBoxProcessor final : public AudioProcessor
+class MeterBoxProcessor final : public AudioProcessor,
+                                private AsyncUpdater
 {
 public:
     MeterBoxProcessor();
@@ -88,6 +90,20 @@ public:
     bool captureReference();
     bool hasReference() const;
 
+    //==============================================================================
+    /** The record the mix is compared with: heard in its place (A/B), at the
+        same loudness, and measured so that every part of the window can show
+        its figures beside the mix's. */
+    ReferencePlayer& getReference() noexcept { return referencePlayer; }
+
+    /** Loads a reference chosen by hand: once measured, its spectrum becomes
+        the Reference target and is chosen. Message thread. */
+    void loadReference (const File&);
+
+    /** The same from a track on a platform (YouTube, TikTok), fetched by the
+        Downloader of the ONIRIQUE site. */
+    void loadReferenceLink (const String&);
+
     AudioProcessorValueTreeState apvts;
 
 
@@ -100,6 +116,8 @@ public:
     onirique::license::Guard license { "onirique-meterbox" };
 
 private:
+    void handleAsyncUpdate() override;
+
     class Analysis;
     struct Raw;
 
@@ -113,6 +131,10 @@ private:
     CriticalSection referenceLock;
     mtx::TonalTarget reference;
     bool referenceValid = false;
+
+    ReferencePlayer referencePlayer;
+    std::atomic<bool> adoptShape { false };     // the next reference loaded becomes the tonal target
+    std::shared_ptr<const ReferenceTrack> adopted;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MeterBoxProcessor)
 };

@@ -24,8 +24,6 @@ namespace
 
 SpectrumDisplay::SpectrumDisplay (MeterBoxProcessor& p) : processor (p)
 {
-    setOpaque (true);
-
     auto& state = processor.apvts;
 
     targetBox.addItemList (state.getParameter ("tonal")->getAllValueStrings(), 1);
@@ -47,7 +45,7 @@ SpectrumDisplay::SpectrumDisplay (MeterBoxProcessor& p) : processor (p)
 
 void SpectrumDisplay::resized()
 {
-    auto row = getLocalBounds().withHeight (kPanelHeading).withTrimmedRight (14).withTrimmedTop (5).withHeight (20);
+    auto row = getLocalBounds().withHeight (kPanelHeading).withTrimmedTop (5).withHeight (20);
 
     captureButton.setBounds (row.removeFromRight (82));
     row.removeFromRight (6);
@@ -74,33 +72,47 @@ void SpectrumDisplay::paint (Graphics& g)
 {
     paintPanel (g, getLocalBounds(), "SPECTRUM");
 
-    // The key, after the name: as much of it as there is room for before
-    // the controls.
+    auto body = getLocalBounds().toFloat().withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
+    const auto hasReference = processor.getReference().getTrack() != nullptr;
+
+    //==============================================================================
+    // The legend, on a line of its own under the name: every curve and band
+    // of the graph, whatever the width of the window.
     {
-        auto key = Rectangle<float> (104.0f, 2.0f, (float) targetBox.getX() - 104.0f - 8.0f, (float) kPanelHeading);
+        auto key = body.removeFromTop (16.0f);
+        const auto font = capsFont (8.5f);
 
-        auto entry = [&] (const String& name, Colour colour, float height)
+        struct Entry { const char* name; Colour colour; float height; };
+        std::vector<Entry> entries { { "LIVE", ember.withAlpha (0.6f), 8.0f },
+                                     { "AVERAGE", Colours::white, 2.0f },
+                                     { "OFF TARGET", emberLit, 2.0f },
+                                     { "TARGET", bone.withAlpha (0.3f), 8.0f } };
+
+        if (hasReference)
+            entries.push_back ({ "REFERENCE", refInk, 2.0f });
+
+        // As much room between them as the line allows.
+        auto width = 0.0f;
+
+        for (const auto& e : entries)
+            width += 18.0f + GlyphArrangement::getStringWidth (font, e.name);
+
+        const auto spacing = jlimit (8.0f, 22.0f, (key.getWidth() - width) / (float) jmax (1, (int) entries.size() - 1));
+
+        for (const auto& e : entries)
         {
-            if (key.getWidth() < GlyphArrangement::getStringWidth (capsFont (9.0f), name) + 32.0f)
-            {
-                key = {};
-                return;
-            }
+            g.setColour (e.colour);
+            g.fillRoundedRectangle (key.removeFromLeft (14.0f).withSizeKeepingCentre (12.0f, e.height), 1.0f);
 
-            g.setColour (colour);
-            g.fillRoundedRectangle (key.removeFromLeft (14.0f).withSizeKeepingCentre (12.0f, height), 1.0f);
+            const auto textWidth = GlyphArrangement::getStringWidth (font, e.name) + 4.0f;
             g.setColour (haze);
-            g.setFont (capsFont (9.0f));
-            g.drawText (name, key.removeFromLeft (GlyphArrangement::getStringWidth (capsFont (9.0f), name) + 18.0f).withTrimmedLeft (5.0f),
-                        Justification::centredLeft, false);
-        };
-
-        entry ("LIVE", ember.withAlpha (0.6f), 8.0f);
-        entry ("AVERAGE", Colours::white, 2.0f);
-        entry ("TARGET", bone.withAlpha (0.3f), 8.0f);
+            g.setFont (font);
+            g.drawText (e.name, key.removeFromLeft (textWidth + 4.0f).withTrimmedLeft (4.0f), Justification::centredLeft, false);
+            key.removeFromLeft (spacing);
+        }
     }
 
-    auto body = getLocalBounds().toFloat().reduced (14.0f, 0.0f).withTrimmedTop ((float) kPanelHeading + 6.0f).withTrimmedBottom (12.0f);
+    body.removeFromTop (4.0f);
     auto regions = body.removeFromBottom (40.0f);
     body.removeFromBottom (18.0f);
     const auto plot = body;
@@ -223,6 +235,36 @@ void SpectrumDisplay::paint (Graphics& g)
                 g.strokePath (out, PathStrokeType (2.0f, PathStrokeType::curved, PathStrokeType::rounded));
             }
         }
+
+        // The reference's average over the whole record, laid on the mix's
+        // average so that it is the shapes that are compared, not the levels.
+        if (const auto ref = processor.getReference().getTrack(); ref != nullptr && ref->stats.spectrumMeasured)
+        {
+            double difference = 0.0;
+            int counted = 0;
+
+            if (frame.measured)
+                for (int p = 0; p < mtx::kSpectrumPoints; ++p)
+                    if (const auto hz = mtx::spectrumHz (p); hz >= 40.0f && hz <= 16000.0f
+                                                             && frame.average[p] > kBottomDb && ref->stats.spectrum[p] > kBottomDb)
+                    {
+                        difference += frame.average[p] - ref->stats.spectrum[p];
+                        ++counted;
+                    }
+
+            const auto shift = counted > 0 ? (float) (difference / counted) : 0.0f;
+            std::vector<Point<float>> points;
+
+            for (int p = 0; p < mtx::kSpectrumPoints; ++p)
+                points.push_back ({ xOf (mtx::spectrumHz (p)), yOf (jmax (kBottomDb - 4.0f, ref->stats.spectrum[p] + shift)) });
+
+            const auto curve = curveThrough (points);
+
+            g.setColour (Colours::black.withAlpha (0.35f));
+            g.strokePath (curve, PathStrokeType (3.5f, PathStrokeType::curved, PathStrokeType::rounded));
+            g.setColour (refInk);
+            g.strokePath (curve, PathStrokeType (1.5f, PathStrokeType::curved, PathStrokeType::rounded));
+        }
     }
 
     if (! hasTarget)
@@ -254,8 +296,6 @@ void SpectrumDisplay::paint (Graphics& g)
             g.fillRect (left, plot.getY(), 1.0f, plot.getHeight());
         }
 
-        g.setColour (Colour (0x40000000));
-        g.fillRoundedRectangle (cell, 6.0f);
 
         const auto out = compared && std::abs (deviation[i]) > tolerance[i];
         auto text = cell.reduced (8.0f, 0.0f).removeFromTop (22.0f);

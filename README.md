@@ -52,6 +52,7 @@ build/Release/meterbox_snapshot.exe snapshot.png             # capture de l'inte
 build/Release/meterbox_snapshot.exe phase.png --phase        # le même, les graves hors phase : à quoi ressemble un défaut
 build/Release/meterbox_snapshot.exe licence.png --licence    # avec la pastille de licence et sa page
 build/Release/meterbox_snapshot.exe snapshot.png --bench     # et le temps que prend le dessin de la fenêtre
+build/Release/meterbox_snapshot.exe ref.png --reference      # avec une référence chargée (--listen : écoutée, sur B)
 build/Release/meterbox_snapshot.exe --selftest               # le plugin comme un hôte le pilote
 ```
 
@@ -83,6 +84,41 @@ peak), le spectre et la phase continuent : seul ce qui s'accumule est figé.
 | **Norme** | Règle la cible et le plafond d'un coup : Streaming −14 (Spotify, YouTube, Tidal, Amazon Music), Apple Music −16, Loud master −9, EBU R 128 −23, ATSC A/85 −24. `Custom` dès qu'un des deux chiffres est déplacé à la main. |
 | **Target** | Le loudness intégré visé, de −36 à −6 LUFS. |
 | **TP Max** | Le plafond de true peak, de −9 à 0 dBTP. |
+
+### Référence (A/B)
+
+Le bandeau au-dessus du pied compare le mix à un titre de référence.
+
+- **La référence** : un fichier glissé sur la fenêtre (n'importe où), ou choisi
+  en cliquant sur le bandeau ou sur **Load**. WAV, AIFF, FLAC, MP3, OGG ; M4A et
+  AAC sur Mac. Quinze minutes au plus. Elle est lue et mesurée à part, sans
+  toucher au thread audio, puis gardée avec le projet (le chemin du fichier).
+  Choisie à la main, sa balance tonale devient la cible **Reference** du
+  spectre.
+- **A / B** : A, le mix ; B, la référence, jouée à sa place. Le passage est
+  fondu sur 20 ms. La référence avance quand le DAW joue, que l'on écoute A ou
+  B, et boucle à la fin ; un clic sur sa forme d'onde choisit où elle joue. Un
+  export sort toujours le mix, même sur B. Le projet rouvre toujours sur A.
+- **Match** : la référence est jouée au loudness intégré du mix (le court terme
+  tant que l'intégré n'est pas mesuré). À côté, le gain qui lui est appliqué.
+- **Link** : la référence prise sur une plateforme. Un lien YouTube ou TikTok,
+  collé dans le champ (un lien déjà copié y est mis d'office) ou glissé depuis
+  le navigateur sur la fenêtre. Le son est récupéré en WAV par le Downloader
+  du site ONIRIQUE (`https://onirique.store/api/downloader/youtube`, le même
+  que sa page), puis gardé dans `~/Library/Onirique/MeterBox References`
+  (Mac) ou `AppData\Roaming\Onirique\MeterBox References` (Windows), et
+  chargé comme un fichier. Les limites du Downloader valent : un lien par
+  minute sans le rôle ONIRIQUE, 20 minutes de son au plus.
+- **Eject** : la retire.
+
+Les mesures restent celles du mix, même sur B. Les chiffres de la référence,
+mesurés une fois sur tout le titre, sont écrits à côté, en bleu, dans chaque
+partie : son loudness intégré et l'écart du mix, ses maxima sur les barres, sa
+plage, son true peak et son PLR ; son intégré et sa répartition dans
+l'historique ; sa moyenne dans le spectre, posée sur celle du mix ; sa crête,
+son RMS et son facteur de crête sous la forme d'onde ; sa corrélation, sa
+balance, sa largeur, sa perte en mono et sa corrélation par fréquence dans la
+phase.
 
 ### Loudness
 
@@ -191,6 +227,7 @@ moyenne du spectre couvre tout le fichier, comme le loudness.
 | `Source/dsp/Tonal.*` | Les cibles de balance tonale et leur comparaison. |
 | `Source/dsp/Meter.*` | Le tout, et son passage du thread audio à l'écran : historique, goniomètre. |
 | `Source/PluginProcessor.*` | Réglages, transport, normes, référence capturée, état. |
+| `Source/Reference.*` | La référence A/B : lecture du fichier, mesure sur tout le titre, lecture à la place du mix, match de loudness. |
 | `Source/PluginEditor.*`, `Source/ui/` | Interface : thème de la gamme, et un fichier par partie de la fenêtre. |
 | `License/` | La licence commune à la gamme, copiée telle quelle de `plugin-license/` du dépôt ONIRIQUE CENTRAL. |
 | `tests/test_meter.cpp` | Toutes les mesures, hors ligne, sur les signaux d'EBU Tech 3341 et 3342. |

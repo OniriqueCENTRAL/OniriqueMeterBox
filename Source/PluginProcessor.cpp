@@ -9,6 +9,8 @@ namespace
     using Attributes = AudioParameterFloatAttributes;
 
     const Identifier kReferenceProperty ("reference");
+    const Identifier kReferenceFileProperty ("referenceFile");
+    const Identifier kReferenceMatchProperty ("referenceMatch");
 
     float parseNumber (const String& text)
     {
@@ -107,10 +109,16 @@ MeterBoxProcessor::MeterBoxProcessor()
       analysis (std::make_unique<Analysis> (meter))
 {
     analysis->startThread();
+
+    // Called on the loader's thread: the rest is done on the message thread.
+    referencePlayer.onLoaded = [this] { triggerAsyncUpdate(); };
 }
 
 MeterBoxProcessor::~MeterBoxProcessor()
 {
+    referencePlayer.stop();
+    referencePlayer.onLoaded = nullptr;
+    cancelPendingUpdate();
     analysis->stopThread (2000);
 }
 
@@ -128,6 +136,7 @@ void MeterBoxProcessor::prepareToPlay (double sampleRate, int)
     license.refresh();
     meter.prepare (sampleRate, jlimit (1, (int) mtx::kMaxChannels, getMainBusNumInputChannels()));
     meter.setAveraging (roundToInt (raw->average->load()));
+    referencePlayer.prepare (sampleRate, getMainBusNumOutputChannels());
 
     // A render starts a measurement of its own.
     wasPlaying = false;
@@ -140,13 +149,14 @@ void MeterBoxProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
     const auto numIn = jmin (getMainBusNumInputChannels(), (int) mtx::kMaxChannels, buffer.getNumChannels());
     const auto numSamples = buffer.getNumSamples();
 
+    bool playing = true;
+
     if (numIn >= 1 && numSamples > 0)
     {
         // Following the host: a measurement starts when playback does, and
         // holds while it is stopped. A host that says nothing is taken to be
         // playing.
         const auto sync = raw->sync->load() > 0.5f;
-        bool playing = true;
 
         if (sync)
             if (auto* head = getPlayHead())
@@ -172,6 +182,22 @@ void MeterBoxProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
         // can follow, and can afford to wait for them.
         if (isNonRealtime())
             meter.analyse();
+    }
+
+    // The reference in place of the mix, when it is the one listened to: after
+    // the mix has been measured, so that the measurement stays the mix's. It
+    // moves along when the host does, sync or not.
+    {
+        bool hostPlaying = true;
+
+        if (auto* head = getPlayHead())
+            if (const auto position = head->getPosition())
+                hostPlaying = position->getIsPlaying();
+
+        const auto values = meter.loudness();
+        const auto mixLufs = values.integrated > -70.0f ? values.integrated : values.shortTerm;
+
+        referencePlayer.process (buffer, hostPlaying && playing, isNonRealtime(), mixLufs);
     }
 
     // Last, and over every output: what an unlicensed plugin lets through.
@@ -283,6 +309,38 @@ bool MeterBoxProcessor::captureReference()
 }
 
 //==============================================================================
+void MeterBoxProcessor::loadReference (const File& file)
+{
+    adoptShape.store (true);
+    referencePlayer.load (file);
+}
+
+void MeterBoxProcessor::loadReferenceLink (const String& link)
+{
+    adoptShape.store (true);
+    referencePlayer.loadLink (link);
+}
+
+void MeterBoxProcessor::handleAsyncUpdate()
+{
+    // A reference has just been measured. Chosen by hand, its shape becomes
+    // the Reference target; brought back with a project, it leaves the
+    // target as the project had it.
+    const auto track = referencePlayer.getTrack();
+
+    if (track == nullptr || ! adoptShape.exchange (false) || ! track->stats.spectrumMeasured)
+        return;
+
+    {
+        const ScopedLock lock (referenceLock);
+        reference = mtx::targetFrom (track->stats.spectrum);
+        referenceValid = true;
+    }
+
+    moveParameter (apvts, "tonal", (float) mtx::kNumStockTargets);
+}
+
+//==============================================================================
 void MeterBoxProcessor::getStateInformation (MemoryBlock& destination)
 {
     auto state = apvts.copyState();
@@ -306,6 +364,15 @@ void MeterBoxProcessor::getStateInformation (MemoryBlock& destination)
             state.removeProperty (kReferenceProperty, nullptr);
         }
     }
+
+    // The reference listened to goes with the project too: where the file is,
+    // and whether it is brought to the loudness of the mix.
+    if (const auto track = referencePlayer.getTrack())
+        state.setProperty (kReferenceFileProperty, track->file.getFullPathName(), nullptr);
+    else
+        state.removeProperty (kReferenceFileProperty, nullptr);
+
+    state.setProperty (kReferenceMatchProperty, referencePlayer.isMatching(), nullptr);
 
     if (const auto xml = state.createXml())
         copyXmlToBinary (*xml, destination);
@@ -336,6 +403,24 @@ void MeterBoxProcessor::setStateInformation (const void* data, int sizeInBytes)
             reference = mtx::targetFrom (shape);
         }
     }
+
+    // The reference the project was saved with, if it is still where it was.
+    referencePlayer.setMatching ((bool) state.getProperty (kReferenceMatchProperty, true));
+
+    const auto path = state.getProperty (kReferenceFileProperty).toString();
+    const auto current = referencePlayer.getTrack();
+
+    if (path.isNotEmpty() && File::isAbsolutePath (path) && File (path).existsAsFile())
+    {
+        if (current == nullptr || current->file != File (path))
+        {
+            adoptShape.store (false);
+            referencePlayer.load (File (path));
+        }
+    }
+
+    state.removeProperty (kReferenceFileProperty, nullptr);
+    state.removeProperty (kReferenceMatchProperty, nullptr);
 
     presets.readState (state);   // l'autre côté A/B
     apvts.replaceState (state);

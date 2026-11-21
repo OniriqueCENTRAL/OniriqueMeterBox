@@ -6,10 +6,18 @@
 //   meterbox_snapshot out.png --phase       the same with the lows out of phase, to see what a fault looks like
 //   meterbox_snapshot out.png --licence     with the licence badge and its page left on
 //   meterbox_snapshot out.png --bench       and how long the window takes to draw
+//   meterbox_snapshot out.png --reference   with a reference loaded (louder, brighter, wider), its figures beside the mix's
+//   meterbox_snapshot out.png --listen      the same, the reference being listened to (B)
+//   meterbox_snapshot out.png --link URL    the reference fetched from a platform by the Downloader of the site
 //   meterbox_snapshot --selftest            the plugin as a host drives it, without a window
 #include "../Source/PluginEditor.h"
 #include "../Source/PluginProcessor.h"
 #include "TestSignal.h"
+
+#if JUCE_MAC
+ #include <objc/message.h>
+ #include <objc/runtime.h>
+#endif
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
 
@@ -27,6 +35,48 @@ void setParameter (onirique::MeterBoxProcessor& processor, const char* id, float
 {
     auto* p = processor.apvts.getParameter (id);
     p->setValueNotifyingHost (p->convertTo0to1 (value));
+}
+
+/** Writes a reference to compare the test music with: the same music, louder,
+    brighter and wider, as a mastered record of it would be. */
+juce::File writeReference (double seconds)
+{
+    std::vector<float> left, right;
+    mtxtest::makeMusic (seconds, kSr, left, right);
+
+    double lowL = 0.0, lowR = 0.0;
+    const auto k = 1.0 - std::exp (-2.0 * mtxtest::kPi * 3000.0 / kSr);
+    juce::AudioBuffer<float> buffer (2, (int) left.size());
+
+    for (size_t i = 0; i < left.size(); ++i)
+    {
+        lowL += k * (left[i] - lowL);
+        lowR += k * (right[i] - lowR);
+
+        // Highs up, sides up, and everything pushed up into a soft limit.
+        auto l = (double) left[i] + 0.8 * (left[i] - lowL);
+        auto r = (double) right[i] + 0.8 * (right[i] - lowR);
+        const auto mid = 0.5 * (l + r), side = 0.5 * (l - r) * 1.6;
+
+        l = std::tanh (3.0 * (mid + side)) * 0.95;
+        r = std::tanh (3.0 * (mid - side)) * 0.95;
+
+        buffer.setSample (0, (int) i, (float) l);
+        buffer.setSample (1, (int) i, (float) r);
+    }
+
+    auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("meterbox-reference.wav");
+    file.deleteFile();
+
+    juce::WavAudioFormat wav;
+
+    if (auto writer = wav.createWriterFor (file.createOutputStream().release(), kSr, 2, 24, {}, 0))
+    {
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+        delete writer;
+    }
+
+    return file;
 }
 
 /** Plays two sides through the plugin, a block at a time. */
@@ -50,8 +100,9 @@ void play (onirique::MeterBoxProcessor& processor, const std::vector<float>& lef
     picture and ends the program. */
 struct Director final : juce::Timer
 {
-    Director (juce::File destination, bool outOfPhase, bool withLicence, bool timed, int width, int height)
-        : file (std::move (destination)), bench (timed)
+    Director (juce::File destination, bool outOfPhase, bool withLicence, bool timed, int width, int height,
+              bool withReference, bool listen, juce::String link)
+        : file (std::move (destination)), bench (timed), listening (listen)
     {
         constexpr double seconds = 96.0;
 
@@ -75,6 +126,11 @@ struct Director final : juce::Timer
         processor->setPlayConfigDetails (2, 2, kSr, kBlock);
         setParameter (*processor, "span", 1.0f);
         processor->prepareToPlay (kSr, kBlock);
+
+        if (link.isNotEmpty())
+            processor->loadReferenceLink (link);
+        else if (withReference || listen)
+            processor->loadReference (writeReference (60.0));
 
         // All but the last three seconds, as fast as it will go.
         position = left.size() - (size_t) (kSr * 3.0);
@@ -100,6 +156,18 @@ struct Director final : juce::Timer
         const auto to = std::min (left.size(), position + (size_t) (3 * kBlock));
         play (*processor, left, right, position, to);
         position += (to - position) / kBlock * kBlock;
+
+        // Not before the reference is in place, and seen to move.
+        const auto status = processor->getReference().getStatus();
+
+        if (status == onirique::ReferencePlayer::Status::loading || status == onirique::ReferencePlayer::Status::downloading)
+            return;
+
+        if (listening && ! processor->getReference().isListening())
+        {
+            processor->getReference().seek (41.0);
+            processor->getReference().setListening (true);
+        }
 
         if (++ticks > 80)
             finish();
@@ -132,7 +200,7 @@ struct Director final : juce::Timer
     }
 
     juce::File file;
-    bool bench = false;
+    bool bench = false, listening = false;
     std::unique_ptr<onirique::MeterBoxProcessor> processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     std::vector<float> left, right;
@@ -269,6 +337,116 @@ int selfTest()
         check (sameShape, "and the reference that was captured");
     }
 
+    // The reference: heard in place of the mix, at its loudness, and never in a render.
+    {
+        const auto file = writeReference (12.0);
+
+        auto processor = makeProcessor();
+        processor->setPlayConfigDetails (2, 2, kSr, kBlock);
+        processor->prepareToPlay (kSr, kBlock);
+
+        auto& player = processor->getReference();
+        player.load (file);
+
+        for (int wait = 0; wait < 400 && player.getStatus() == onirique::ReferencePlayer::Status::loading; ++wait)
+            juce::Thread::sleep (25);
+
+        const auto track = player.getTrack();
+        check (track != nullptr && player.getStatus() == onirique::ReferencePlayer::Status::ready, "a reference is read and measured");
+
+        if (track != nullptr)
+        {
+            const auto& stats = track->stats;
+            std::printf ("    the reference: I %.1f LUFS, LRA %.1f, TP %.1f dBTP, width %.0f %%, crest %.1f dB\n",
+                         stats.loudness.integrated, stats.loudness.range,
+                         juce::jmax (stats.loudness.truePeak[0], stats.loudness.truePeak[1]), stats.stereo.width * 100.0f, stats.crestDb);
+            check (stats.spectrumMeasured && stats.loudness.integrated > -20.0f && stats.distributionMost > 0, "and its figures are those of a loud record");
+
+            juce::AudioBuffer<float> buffer (2, kBlock);
+            juce::MidiBuffer midi;
+            auto through = [&] (size_t at)
+            {
+                buffer.copyFrom (0, 0, left.data() + at, kBlock);
+                buffer.copyFrom (1, 0, right.data() + at, kBlock);
+                processor->processBlock (buffer, midi);
+            };
+
+            // A: the mix, to the bit, the reference loaded or not.
+            bool same = true;
+            size_t at = 0;
+
+            for (; at + kBlock <= (size_t) (kSr * 4.0); at += kBlock)
+            {
+                through (at);
+
+                for (int i = 0; i < kBlock; ++i)
+                    same = same && buffer.getSample (0, i) == left[at + (size_t) i];
+            }
+
+            check (same, "on A, what goes out is still the mix, to the bit");
+
+            // B: the reference, brought to the loudness of the mix.
+            player.setListening (true);
+            double mixSquares = 0.0, outSquares = 0.0;
+            bool differs = false;
+
+            for (int b = 0; at + kBlock <= (size_t) (kSr * 8.0); at += kBlock, ++b)
+            {
+                through (at);
+
+                if (b < 20)
+                    continue;
+
+                for (int i = 0; i < kBlock; ++i)
+                {
+                    mixSquares += (double) left[at + (size_t) i] * left[at + (size_t) i];
+                    outSquares += (double) buffer.getSample (0, i) * buffer.getSample (0, i);
+                    differs = differs || buffer.getSample (0, i) != left[at + (size_t) i];
+                }
+            }
+
+            const auto mixLufs = processor->getMeter().loudness().integrated;
+            std::printf ("    on B: gain %.1f dB (mix %.1f LUFS), level against the mix %.1f dB\n",
+                         player.getGainDb(), mixLufs, 10.0 * std::log10 (outSquares / mixSquares));
+            check (differs && player.isHeard(), "on B, the reference is heard in its place");
+            check (std::abs (player.getGainDb() - (mixLufs - stats.loudness.integrated)) < 0.05f, "brought to the loudness of the mix");
+
+            // The meter still measures the mix.
+            check (mixLufs < stats.loudness.integrated - 2.0f, "and the meter still measures the mix, not the reference");
+
+            // A render is the mix, B or not.
+            processor->setNonRealtime (true);
+            same = true;
+
+            for (int b = 0; b < 40 && at + kBlock <= left.size(); ++b, at += kBlock)
+            {
+                through (at);
+
+                for (int i = 0; i < kBlock; ++i)
+                    same = same && buffer.getSample (0, i) == left[at + (size_t) i];
+            }
+
+            processor->setNonRealtime (false);
+            check (same, "a render is always the mix, even on B");
+
+            // The reference goes with the project.
+            juce::MemoryBlock saved;
+            processor->getStateInformation (saved);
+
+            auto second = makeProcessor();
+            second->setStateInformation (saved.getData(), (int) saved.getSize());
+
+            for (int wait = 0; wait < 400 && second->getReference().getStatus() == onirique::ReferencePlayer::Status::loading; ++wait)
+                juce::Thread::sleep (25);
+
+            const auto restored = second->getReference().getTrack();
+            check (restored != nullptr && restored->file == file && ! second->getReference().isListening(),
+                   "a restored project has its reference back, on A");
+        }
+
+        file.deleteFile();
+    }
+
     std::printf (failures == 0 ? "\nall passed\n" : "\n%d FAILED\n", failures);
     return failures;
 }
@@ -277,6 +455,13 @@ int main (int argc, char** argv)
 {
     if (argc < 2)
         return 2;
+
+   #if JUCE_MAC
+    // Built against the plugin's code, JUCE does not make the application object
+    // a program has: without it the message loop returns at once.
+    using Send = void* (*) (void*, SEL);
+    ((Send) objc_msgSend) ((void*) objc_getClass ("NSApplication"), sel_registerName ("sharedApplication"));
+   #endif
 
     const juce::ScopedJuceInitialiser_GUI gui;
 
@@ -287,17 +472,28 @@ int main (int argc, char** argv)
     const auto outOfPhase = arguments.contains ("--phase");
     const auto withLicence = arguments.contains ("--licence");
     const auto bench = arguments.contains ("--bench");
+    const auto withReference = arguments.contains ("--reference");
+    const auto listen = arguments.contains ("--listen");
+    juce::String link;
+
+    if (const auto at = arguments.indexOf ("--link"); at >= 0)
+    {
+        link = arguments[at + 1];
+        arguments.removeRange (at, 2);
+    }
 
     arguments.removeString ("--phase");
     arguments.removeString ("--licence");
     arguments.removeString ("--bench");
+    arguments.removeString ("--reference");
+    arguments.removeString ("--listen");
 
     const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (arguments[0]);
     const auto width = arguments.size() > 2 ? arguments[1].getIntValue() : 1400;
     const auto height = arguments.size() > 2 ? arguments[2].getIntValue() : 780;
 
     {
-        Director director (file, outOfPhase, withLicence, bench, width, height);
+        Director director (file, outOfPhase, withLicence, bench, width, height, withReference, listen, link);
         juce::MessageManager::getInstance()->runDispatchLoop();
     }
 

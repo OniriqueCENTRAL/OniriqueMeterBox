@@ -14,7 +14,8 @@ namespace
     {
         static OniriqueLookAndFeel laf;
         return laf;
-    }
+    }
+
     constexpr int kTitleLeft = 72;
     constexpr int kFootHeight = 46;
     constexpr int kGap = 12;
@@ -87,7 +88,8 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
       history (p),
       spectrum (p),
       phase (p),
-      waveform (p)
+      waveform (p),
+      referenceStrip (p)
 {
     setLookAndFeel (&sharedLookAndFeel());
     logo = makeLogo();
@@ -99,6 +101,7 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     addAndMakeVisible (spectrum);
     addAndMakeVisible (phase);
     addAndMakeVisible (waveform);
+    addAndMakeVisible (referenceStrip);
 
     // When it measures.
     syncButton.setClickingTogglesState (true);
@@ -142,6 +145,12 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     describe ({ &spectrum.captureButton }, "Capture : fait de la moyenne affichée la cible Reference. Joue un titre de référence, laisse la moyenne se poser, puis capture. Elle est enregistrée avec le projet.");
     describe ({ &waveform }, "La forme d'onde de tout ce qui a été mesuré depuis la remise à zéro, du haut (le début) vers le bas (maintenant) : la gauche à gauche, la droite à droite. En rouge, les crêtes ; en clair au milieu, le niveau RMS. Les lignes sont -12 dB, -6 dB et la pleine échelle. Une marque blanche au bord là où le true peak a dépassé le plafond. En dessous : la crête la plus haute de chaque côté depuis la remise à zéro, puis le niveau RMS de chaque côté et le facteur de crête sur la dernière seconde, et la durée mesurée.");
     describe ({ &phase }, "La phase. Le goniomètre : ce qui est identique des deux côtés monte au milieu, ce qui est en opposition s'étale à l'horizontale. La barre : la corrélation, de -1 (les côtés s'annulent en mono) à +1 (mono), avec son minimum récent. Balance : le côté le plus fort. Width : la part du son qui est sur les côtés. Mono : ce que le mix perd une fois sommé en mono. En bas, la corrélation fréquence par fréquence : sous le milieu, cette zone disparaît en mono.");
+    describe ({ &referenceStrip.switchZone }, "A/B : A, tu écoutes ton mix ; B, la référence, à sa place. Le passage de l'un à l'autre est fondu, sans clic. Les mesures restent celles du mix, et les chiffres de la référence s'affichent à côté, en bleu, dans chaque partie de la fenêtre. À l'export, c'est toujours le mix qui sort.");
+    describe ({ &referenceStrip.trackZone }, "La référence : glisse un fichier audio ici (ou n'importe où sur la fenêtre), ou clique pour en chercher un (WAV, AIFF, FLAC, MP3, OGG ; M4A et AAC sur Mac). Elle avance avec la lecture du DAW, en boucle ; clique sur sa forme d'onde pour choisir où elle joue. À droite, son loudness intégré, son true peak, sa plage et sa durée, mesurés sur tout le titre. Elle est gardée avec le projet. Un lien YouTube ou TikTok glissé depuis le navigateur marche aussi.");
+    describe ({ &referenceStrip.linkButton }, "Link : prendre la référence sur une plateforme. Colle un lien YouTube ou TikTok (un lien copié est déjà dedans), puis Entrée ou Fetch. Le son est récupéré par le Downloader du site ONIRIQUE, en WAV, et gardé sur cet ordinateur (dossier « MeterBox References »). Un lien par minute sans le rôle ONIRIQUE ; 20 minutes de son au plus ; les conditions du Downloader s'appliquent.");
+    describe ({ &referenceStrip.matchButton }, "Match : la référence est jouée au loudness intégré de ton mix, pour comparer le son et pas le volume. À côté, le gain qui lui est appliqué. Éteint, elle est jouée telle quelle.");
+    describe ({ &referenceStrip.loadButton }, "Load : chercher un fichier de référence. Sa balance tonale devient la cible Reference du spectre.");
+    describe ({ &referenceStrip.ejectButton }, "Eject : retirer la référence.");
     describe ({ &syncButton }, "Sync : la mesure suit le transport. Elle repart de zéro quand la lecture démarre et se fige à l'arrêt. Éteint, elle tourne en continu.");
     describe ({ &pauseButton }, "Pause : fige l'intégré, l'historique et les maxima. Les niveaux instantanés, le spectre et la phase continuent.");
     describe ({ &resetButton }, "Reset : remet à zéro l'intégré, la plage, les maxima, l'historique et la moyenne du spectre.");
@@ -176,6 +185,64 @@ MeterBoxEditor::~MeterBoxEditor()
     setLookAndFeel (nullptr);
 }
 
+bool MeterBoxEditor::isInterestedInFileDrag (const StringArray& files)
+{
+    for (const auto& path : files)
+        if (ReferencePlayer::canRead (File (path)))
+            return true;
+
+    return false;
+}
+
+void MeterBoxEditor::fileDragEnter (const StringArray&, int, int)
+{
+    referenceStrip.setDragging (true);
+}
+
+void MeterBoxEditor::fileDragExit (const StringArray&)
+{
+    referenceStrip.setDragging (false);
+}
+
+void MeterBoxEditor::filesDropped (const StringArray& files, int, int)
+{
+    referenceStrip.setDragging (false);
+
+    for (const auto& path : files)
+        if (ReferencePlayer::canRead (File (path)))
+        {
+            processor.loadReference (File (path));
+            break;
+        }
+
+    referenceStrip.refresh();
+}
+
+bool MeterBoxEditor::isInterestedInTextDrag (const String& text)
+{
+    return ReferencePlayer::isPlatformLink (text);
+}
+
+void MeterBoxEditor::textDragEnter (const String&, int, int)
+{
+    referenceStrip.setDragging (true);
+}
+
+void MeterBoxEditor::textDragExit (const String&)
+{
+    referenceStrip.setDragging (false);
+}
+
+void MeterBoxEditor::textDropped (const String& text, int, int)
+{
+    referenceStrip.setDragging (false);
+
+    if (ReferencePlayer::isPlatformLink (text))
+        processor.loadReferenceLink (text.trim());
+
+    referenceStrip.refresh();
+}
+
 void MeterBoxEditor::hideLicence()
 {
     if (licenseOverlay != nullptr)
@@ -198,6 +265,7 @@ void MeterBoxEditor::timerCallback()
     processor.getMeter().readSpectrum (frame);
 
     loudness.refresh();
+    referenceStrip.refresh();
     spectrum.refresh (frame);
     phase.refresh (frame);
 
@@ -455,6 +523,20 @@ void MeterBoxEditor::paint (Graphics& g)
         daBackdrop = onirique::da::backdrop (getWidth(), getHeight(), (float) getWidth() / 1100.0f);
     g.drawImageAt (daBackdrop, 0, 0);
 
+    // The hairlines between the parts, fading out at their ends.
+    for (const auto& rule : rules)
+    {
+        const auto vertical = rule.getHeight() > rule.getWidth();
+        const auto edge = Colour (0x00ffd2d6), lit = Colour (0x2effd2d6);
+
+        ColourGradient fade = vertical ? ColourGradient (edge, 0.0f, rule.getY(), edge, 0.0f, rule.getBottom(), false)
+                                       : ColourGradient (edge, rule.getX(), 0.0f, edge, rule.getRight(), 0.0f, false);
+        fade.addColour (0.15, lit);
+        fade.addColour (0.85, lit);
+        g.setGradientFill (fade);
+        g.fillRect (rule);
+    }
+
     paintStatus (g);
 }
 
@@ -487,19 +569,37 @@ void MeterBoxEditor::resized()
     foot.removeFromLeft (16);
     statusArea = foot.removeFromLeft (jmin (foot.getWidth() - 14, 260));
 
+    rules.clear();
+
+    // The reference, across the window above the foot.
+    auto strip = bounds.removeFromBottom (58).reduced (14, 0);
+    rules.push_back (Rectangle<float> ((float) strip.getX(), (float) strip.getY(), (float) strip.getWidth(), 1.0f));
+    rules.push_back (Rectangle<float> ((float) strip.getX(), (float) strip.getBottom(), (float) strip.getWidth(), 1.0f));
+    referenceStrip.setBounds (strip.reduced (0, 6));
+
 
     // Four columns: the loudness, the two graphs, the waveform, the phase.
     auto body = bounds.reduced (14, kGap);
 
+    // Between two columns, a hairline in the middle of the gap.
+    auto columnRule = [this, &body] (int x)
+    {
+        rules.push_back (Rectangle<float> ((float) x, (float) body.getY() + 4.0f, 1.0f, (float) body.getHeight() - 8.0f));
+    };
+
     loudness.setBounds (body.removeFromLeft (jlimit (250, 300, body.getWidth() * 21 / 100)));
-    body.removeFromLeft (kGap);
+    columnRule (body.getX() + kGap);
+    body.removeFromLeft (2 * kGap);
     phase.setBounds (body.removeFromRight (jlimit (270, 340, body.getWidth() * 29 / 100)));
-    body.removeFromRight (kGap);
+    columnRule (body.getRight() - kGap);
+    body.removeFromRight (2 * kGap);
     waveform.setBounds (body.removeFromRight (jlimit (128, 160, body.getWidth() * 17 / 100)));
-    body.removeFromRight (kGap);
+    columnRule (body.getRight() - kGap);
+    body.removeFromRight (2 * kGap);
 
     history.setBounds (body.removeFromTop (body.getHeight() * 42 / 100));
-    body.removeFromTop (kGap);
+    rules.push_back (Rectangle<float> ((float) body.getX(), (float) body.getY() + (float) kGap, (float) body.getWidth(), 1.0f));
+    body.removeFromTop (2 * kGap);
     spectrum.setBounds (body);
 }
 

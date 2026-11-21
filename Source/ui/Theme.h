@@ -22,6 +22,10 @@ inline const Colour bone    { 0xffffecee };
 inline const Colour haze    { 0xffa88f92 };
 inline const Colour line    { 0x21ffd2d6 };
 
+// The reference, wherever it is shown beside the mix: the one cold colour of
+// the window, so that it is never taken for the mix.
+inline const Colour refInk  { 0xff8fcfff };
+
 inline juce::Font displayFont (float height, bool heavy = true)
 {
     // Named outright: the "default sans-serif" placeholder does not survive

@@ -32,8 +32,6 @@ PhasePanel::PhasePanel (MeterBoxProcessor& p)
       left ((size_t) kDrawnFrames), right ((size_t) kDrawnFrames),
       scope (Image::ARGB, kScopeSize, kScopeSize, true)
 {
-    setOpaque (true);
-
     // Ember where the sound is thin, white only where it piles up.
     for (int i = 0; i < 256; ++i)
     {
@@ -136,7 +134,8 @@ void PhasePanel::paint (Graphics& g)
     paintPanel (g, getLocalBounds(), "PHASE");
 
     const auto audible = values.level > kAudibleDb;
-    auto area = getLocalBounds().toFloat().reduced (14.0f, 0.0f).withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
+    const auto ref = processor.getReference().getTrack();
+    auto area = getLocalBounds().toFloat().withTrimmedTop ((float) kPanelHeading + 4.0f).withTrimmedBottom (12.0f);
 
     //==============================================================================
     // The goniometer: a square, as large as the panel is wide, as long as
@@ -147,8 +146,6 @@ void PhasePanel::paint (Graphics& g)
         const auto centre = square.getCentre();
         const auto half = side * 0.5f;
 
-        g.setColour (Colour (0x40000000));
-        g.fillRoundedRectangle (square, 8.0f);
 
         // The diamond is full scale; the cross, the middle and the sides.
         Path diamond;
@@ -199,7 +196,7 @@ void PhasePanel::paint (Graphics& g)
         const auto centre = track.getCentreX();
         const auto halfWidth = track.getWidth() * 0.5f;
 
-        g.setColour (Colour (0x59000000));
+        g.setColour (Colours::white.withAlpha (0.03f));
         g.fillRoundedRectangle (track, 5.0f);
 
         // The left half is where it should not stay.
@@ -215,6 +212,15 @@ void PhasePanel::paint (Graphics& g)
         g.drawRoundedRectangle (track, 5.0f, 1.0f);
         g.setColour (mist.withAlpha (0.5f));
         g.fillRect (centre - 0.5f, track.getY() - 2.0f, 1.0f, track.getHeight() + 4.0f);
+
+        // The reference's, over the whole record.
+        if (ref != nullptr)
+        {
+            const auto at = centre + ref->stats.stereo.correlation * halfWidth;
+
+            g.setColour (refInk);
+            g.fillRect (at - 1.0f, track.getY() - 3.0f, 2.0f, track.getHeight() + 6.0f);
+        }
 
         if (lowest < 0.999f)
         {
@@ -238,7 +244,7 @@ void PhasePanel::paint (Graphics& g)
     {
         auto rows = area.removeFromTop (3.0f * 21.0f);
 
-        auto row = [&] (const String& name, const String& value, Colour colour)
+        auto row = [&] (const String& name, const String& value, const String& refValue, Colour colour)
         {
             auto r = rows.removeFromTop (21.0f);
 
@@ -246,17 +252,26 @@ void PhasePanel::paint (Graphics& g)
             g.setFont (capsFont (9.5f));
             g.drawText (name, r, Justification::centredLeft, false);
 
+            if (ref != nullptr)
+                paintReferenceFigure (g, refValue, r.removeFromRight (70.0f));
+
             g.setColour (audible ? colour : haze);
             g.setFont (monoFont (12.5f).boldened());
             g.drawText (audible ? value : String ("--"), r, Justification::centredRight, false);
         };
 
-        const auto lean = std::abs (values.balance) < 0.05f ? String ("C")
-                                                            : String (values.balance < 0.0f ? "L " : "R ") + String (std::abs (values.balance), 1) + " dB";
+        auto leanOf = [] (float balance)
+        {
+            return std::abs (balance) < 0.05f ? String ("C")
+                                              : String (balance < 0.0f ? "L " : "R ") + String (std::abs (balance), 1) + " dB";
+        };
 
-        row ("BALANCE", lean, std::abs (values.balance) > 1.5f ? emberLit : mist);
-        row ("WIDTH", String (roundToInt (values.width * 100.0f)) + " %", mist);
-        row ("MONO", String (values.monoLoss, 1) + " dB", values.monoLoss < -3.0f ? emberLit : mist);
+        const auto none = mtx::StereoValues();
+        const auto& r = ref != nullptr ? ref->stats.stereo : none;
+
+        row ("BALANCE", leanOf (values.balance), leanOf (r.balance), std::abs (values.balance) > 1.5f ? emberLit : mist);
+        row ("WIDTH", String (roundToInt (values.width * 100.0f)) + " %", String (roundToInt (r.width * 100.0f)) + " %", mist);
+        row ("MONO", String (values.monoLoss, 1) + " dB", String (r.monoLoss, 1) + " dB", values.monoLoss < -3.0f ? emberLit : mist);
     }
 
     area.removeFromTop (8.0f);
@@ -271,8 +286,6 @@ void PhasePanel::paint (Graphics& g)
 
         auto plot = area.withTrimmedBottom (12.0f);
 
-        g.setColour (Colour (0x40000000));
-        g.fillRoundedRectangle (plot, 6.0f);
 
         const auto middle = plot.getCentreY();
         const auto reach = plot.getHeight() * 0.5f - 4.0f;
@@ -326,6 +339,21 @@ void PhasePanel::paint (Graphics& g)
 
             g.setColour (Colours::white.withAlpha (0.9f));
             g.strokePath (curve, PathStrokeType (1.4f, PathStrokeType::curved, PathStrokeType::rounded));
+        }
+
+        // The reference's, averaged over the whole record.
+        if (ref != nullptr && ref->stats.spectrumMeasured)
+        {
+            Graphics::ScopedSaveState state (g);
+            g.reduceClipRegion (plot.toNearestInt());
+
+            std::vector<Point<float>> points;
+
+            for (int p = 0; p < mtx::kSpectrumPoints; ++p)
+                points.push_back ({ xOfHz (plot, mtx::spectrumHz (p)), middle - ref->stats.correlationByBand[p] * reach });
+
+            g.setColour (refInk);
+            g.strokePath (curveThrough (points), PathStrokeType (1.4f, PathStrokeType::curved, PathStrokeType::rounded));
         }
 
         g.setColour (haze.withAlpha (0.7f));

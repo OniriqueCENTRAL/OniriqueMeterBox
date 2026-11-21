@@ -58,23 +58,33 @@ private:
 //==============================================================================
 constexpr int kPanelHeading = 26;
 
-/** The ground each part of the window stands on, a shade redder than the
-    rest, under its name. */
+/** The name of a part of the window. There is no box: every part stands on
+    the ground of the window itself, named at its top left with a small lit
+    mark before it. */
 inline void paintPanel (Graphics& g, Rectangle<int> bounds, const String& name)
 {
     using namespace theme;
 
-    const auto panel = bounds.toFloat().reduced (0.5f);
+    const auto heading = bounds.withHeight (kPanelHeading).toFloat().translated (0.0f, 2.0f);
+    const auto mark = Rectangle<float> (4.0f, 4.0f).withCentre ({ heading.getX() + 2.0f, heading.getCentreY() });
 
-    g.fillAll (night);
-    g.setColour (deep);
-    g.fillRoundedRectangle (panel, 10.0f);
-    g.setColour (line);
-    g.drawRoundedRectangle (panel, 10.0f, 1.0f);
+    g.setColour (ember.withAlpha (0.35f));
+    g.fillEllipse (mark.expanded (2.0f));
+    g.setColour (emberLit);
+    g.fillEllipse (mark);
 
-    g.setColour (haze);
+    g.setColour (mist.withAlpha (0.8f));
     g.setFont (capsFont (9.5f).withExtraKerningFactor (0.3f));
-    g.drawText (name, bounds.withHeight (kPanelHeading).withTrimmedLeft (14).translated (0, 2), Justification::centredLeft, false);
+    g.drawText (name, heading.withTrimmedLeft (12.0f), Justification::centredLeft, false);
+}
+
+/** A figure of the reference, written beside the mix's. */
+inline void paintReferenceFigure (Graphics& g, const String& text, Rectangle<float> area,
+                                  Justification justification = Justification::centredRight)
+{
+    g.setColour (theme::refInk);
+    g.setFont (theme::monoFont (11.0f));
+    g.drawText (text, area, justification, false);
 }
 
 /** A level as it is written: a dash while there is nothing to write. */

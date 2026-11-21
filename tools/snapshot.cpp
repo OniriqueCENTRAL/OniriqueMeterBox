@@ -8,6 +8,7 @@
 //   meterbox_snapshot out.png --bench       and how long the window takes to draw
 //   meterbox_snapshot out.png --reference   with a reference loaded (louder, brighter, wider), its figures beside the mix's
 //   meterbox_snapshot out.png --listen      the same, the reference being listened to (B)
+//   meterbox_snapshot out.png --rest        at rest, as the shop shows it: nothing played, the licence badge on
 //   meterbox_snapshot out.png --link URL    the reference fetched from a platform by the Downloader of the site
 //   meterbox_snapshot --selftest            the plugin as a host drives it, without a window
 #include "../Source/PluginEditor.h"
@@ -101,8 +102,8 @@ void play (onirique::MeterBoxProcessor& processor, const std::vector<float>& lef
 struct Director final : juce::Timer
 {
     Director (juce::File destination, bool outOfPhase, bool withLicence, bool timed, int width, int height,
-              bool withReference, bool listen, juce::String link)
-        : file (std::move (destination)), bench (timed), listening (listen)
+              bool withReference, bool listen, juce::String link, bool atRest)
+        : file (std::move (destination)), bench (timed), listening (listen), rest (atRest)
     {
         constexpr double seconds = 96.0;
 
@@ -136,14 +137,17 @@ struct Director final : juce::Timer
         position = left.size() - (size_t) (kSr * 3.0);
         position -= position % kBlock;
 
-        processor->setNonRealtime (true);
-        play (*processor, left, right, 0, position);
-        processor->setNonRealtime (false);
+        if (! rest)
+        {
+            processor->setNonRealtime (true);
+            play (*processor, left, right, 0, position);
+            processor->setNonRealtime (false);
+        }
 
         editor.reset (processor->createEditor());
         editor->setSize (width, height);
 
-        if (! withLicence)
+        if (! withLicence && ! rest)
             if (auto* meterBox = dynamic_cast<onirique::MeterBoxEditor*> (editor.get()))
                 meterBox->hideLicence();
 
@@ -153,9 +157,12 @@ struct Director final : juce::Timer
     void timerCallback() override
     {
         // About a tick's worth of audio per tick.
-        const auto to = std::min (left.size(), position + (size_t) (3 * kBlock));
-        play (*processor, left, right, position, to);
-        position += (to - position) / kBlock * kBlock;
+        if (! rest)
+        {
+            const auto to = std::min (left.size(), position + (size_t) (3 * kBlock));
+            play (*processor, left, right, position, to);
+            position += (to - position) / kBlock * kBlock;
+        }
 
         // Not before the reference is in place, and seen to move.
         const auto status = processor->getReference().getStatus();
@@ -200,7 +207,7 @@ struct Director final : juce::Timer
     }
 
     juce::File file;
-    bool bench = false, listening = false;
+    bool bench = false, listening = false, rest = false;
     std::unique_ptr<onirique::MeterBoxProcessor> processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     std::vector<float> left, right;
@@ -474,6 +481,8 @@ int main (int argc, char** argv)
     const auto bench = arguments.contains ("--bench");
     const auto withReference = arguments.contains ("--reference");
     const auto listen = arguments.contains ("--listen");
+    const auto atRest = arguments.contains ("--rest");
+    arguments.removeString ("--rest");
     juce::String link;
 
     if (const auto at = arguments.indexOf ("--link"); at >= 0)
@@ -493,7 +502,7 @@ int main (int argc, char** argv)
     const auto height = arguments.size() > 2 ? arguments[2].getIntValue() : 780;
 
     {
-        Director director (file, outOfPhase, withLicence, bench, width, height, withReference, listen, link);
+        Director director (file, outOfPhase, withLicence, bench, width, height, withReference, listen, link, atRest);
         juce::MessageManager::getInstance()->runDispatchLoop();
     }
 

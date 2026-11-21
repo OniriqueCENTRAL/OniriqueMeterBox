@@ -18,6 +18,13 @@ namespace
     // The Downloader of the ONIRIQUE site: the same one its page uses.
     const char* const kDownloaderUrl = "https://onirique.store/api/downloader/youtube";
 
+    // The search of the "Compare with a reference" page of the site, and its 30 s extracts.
+    const char* const kSearchUrl = "https://onirique.store/api/reference/search";
+    const char* const kPreviewUrl = "https://onirique.store/api/reference/preview/";
+
+    // A request for an extract, told apart from a link in the queue of the loader.
+    const char* const kPreviewPrefix = "preview:";
+
     // Under this, the mix is too quiet to be matched against.
     constexpr float kQuietestMixLufs = -70.0f;
 
@@ -80,6 +87,7 @@ void ReferencePlayer::loadLink (const String& link)
         const ScopedLock lock (requestLock);
         requested = File();
         requestedLink = link.trim();
+        requestedName = {};
         error = {};
     }
 
@@ -89,6 +97,70 @@ void ReferencePlayer::loadLink (const String& link)
         startThread (Priority::low);
     else
         notify();
+}
+
+void ReferencePlayer::loadPreview (const Found& found)
+{
+    {
+        const ScopedLock lock (requestLock);
+        requested = File();
+        requestedLink = kPreviewPrefix + found.id;
+        requestedName = found.artist + String::fromUTF8 (" – ") + found.title + String::fromUTF8 (" (extrait 30 s)");
+        error = {};
+    }
+
+    status.store (Status::downloading, std::memory_order_release);
+
+    if (! isThreadRunning())
+        startThread (Priority::low);
+    else
+        notify();
+}
+
+Array<ReferencePlayer::Found> ReferencePlayer::search (const String& query, String& problem)
+{
+    Array<Found> result;
+    int statusCode = 0;
+
+    auto stream = URL (kSearchUrl).withParameter ("q", query.trim())
+                      .createInputStream (URL::InputStreamOptions (URL::ParameterHandling::inAddress)
+                                              .withConnectionTimeoutMs (15000)
+                                              .withStatusCode (&statusCode));
+
+    if (stream == nullptr)
+    {
+        problem = String::fromUTF8 ("Impossible de joindre le site ONIRIQUE : vérifie ta connexion.");
+        return result;
+    }
+
+    const auto answer = JSON::parse (stream->readEntireStreamAsString());
+
+    if (statusCode != 200)
+    {
+        const auto reason = answer.getProperty ("error", var()).toString();
+        problem = reason.isNotEmpty() ? reason : String::fromUTF8 ("La recherche n'a pas abouti.");
+        return result;
+    }
+
+    if (const auto* list = answer.getArray())
+        for (const auto& item : *list)
+        {
+            Found f;
+            f.id = item.getProperty ("id", var()).toString();
+            f.title = item.getProperty ("title", var()).toString();
+            f.artist = item.getProperty ("artist", var()).toString();
+            f.album = item.getProperty ("album", var()).toString();
+            f.coverUrl = item.getProperty ("cover", var()).toString();
+            f.seconds = (int) item.getProperty ("duration", 0);
+
+            if (f.id.containsOnly ("0123456789") && f.id.isNotEmpty() && f.title.isNotEmpty())
+                result.add (f);
+        }
+
+    if (result.isEmpty())
+        problem = String::fromUTF8 ("Aucun titre trouvé : essaie avec le titre et l'artiste.");
+
+    return result;
 }
 
 bool ReferencePlayer::isPlatformLink (const String& text)
@@ -159,12 +231,13 @@ void ReferencePlayer::run()
     while (! threadShouldExit())
     {
         File file;
-        String link;
+        String link, name;
 
         {
             const ScopedLock lock (requestLock);
             std::swap (file, requested);
             std::swap (link, requestedLink);
+            std::swap (name, requestedName);
         }
 
         if (file == File() && link.isEmpty())
@@ -178,7 +251,8 @@ void ReferencePlayer::run()
         // A track on a platform: fetched first, then read as any file.
         if (link.isNotEmpty())
         {
-            file = download (link, problem);
+            file = link.startsWith (kPreviewPrefix) ? downloadPreview (link.fromFirstOccurrenceOf (kPreviewPrefix, false, false), name, problem)
+                                                    : download (link, problem);
 
             const ScopedLock lock (requestLock);
 
@@ -257,13 +331,39 @@ File ReferencePlayer::download (const String& link, String& problem)
     // Named after the video, as the site names it.
     auto title = URL::removeEscapeChars (headers.getValue ("X-Title", {}).replace ("+", "%2B"));
 
-    if (title.isEmpty())
-        title = "Reference";
+    return keep (*stream, title.isNotEmpty() ? title : String ("Reference"), ".wav", problem, this);
+}
 
+File ReferencePlayer::downloadPreview (const String& id, const String& name, String& problem)
+{
+    int statusCode = 0;
+
+    auto stream = URL (kPreviewUrl + id).createInputStream (URL::InputStreamOptions (URL::ParameterHandling::inAddress)
+                                                                .withConnectionTimeoutMs (30000)
+                                                                .withStatusCode (&statusCode));
+
+    if (stream == nullptr)
+    {
+        problem = String::fromUTF8 ("Impossible de joindre le site ONIRIQUE : vérifie ta connexion.");
+        return {};
+    }
+
+    if (statusCode != 200)
+    {
+        const auto reason = JSON::parse (stream->readEntireStreamAsString()).getProperty ("error", var()).toString();
+        problem = reason.isNotEmpty() ? reason : String::fromUTF8 ("L'extrait n'a pas pu être chargé.");
+        return {};
+    }
+
+    return keep (*stream, name.isNotEmpty() ? name : String ("Reference"), ".mp3", problem, this);
+}
+
+File ReferencePlayer::keep (InputStream& stream, const String& name, const String& extension, String& problem, Thread* thread)
+{
     const auto folder = getDownloadFolder();
     folder.createDirectory();
 
-    const auto destination = folder.getChildFile (File::createLegalFileName (title.substring (0, 120)) + ".wav");
+    const auto destination = folder.getChildFile (File::createLegalFileName (name.substring (0, 120)) + extension);
     const auto partial = destination.withFileExtension (".part");
     partial.deleteFile();
 
@@ -278,12 +378,12 @@ File ReferencePlayer::download (const String& link, String& problem)
 
         HeapBlock<char> chunk (1 << 16);
 
-        while (! stream->isExhausted())
+        while (! stream.isExhausted())
         {
-            if (threadShouldExit())
+            if (thread != nullptr && thread->threadShouldExit())
                 return {};
 
-            const auto got = stream->read (chunk.get(), 1 << 16);
+            const auto got = stream.read (chunk.get(), 1 << 16);
 
             if (got <= 0)
                 break;
@@ -456,7 +556,7 @@ void ReferencePlayer::prepare (double sampleRate, int numChannels)
     channels = numChannels;
 }
 
-void ReferencePlayer::process (AudioBuffer<float>& buffer, bool playing, bool rendering, float mixLufs) noexcept
+void ReferencePlayer::process (AudioBuffer<float>& buffer, bool playing, bool rendering, float mixLufs, double hostSeconds) noexcept
 {
     const auto numSamples = buffer.getNumSamples();
     const auto numOut = jmin (buffer.getNumChannels(), 2);
@@ -484,8 +584,35 @@ void ReferencePlayer::process (AudioBuffer<float>& buffer, bool playing, bool re
         return;
     }
 
+    // Locked to the project: where the reference is follows where the host is.
+    hostTimeKnown.store (hostSeconds >= 0.0, std::memory_order_relaxed);
+
+    if (hostSeconds >= 0.0)
+        lastHostSeconds.store (hostSeconds, std::memory_order_relaxed);
+
+    const auto followsHost = locked.load (std::memory_order_relaxed) && hostSeconds >= 0.0;
+
+    // A click on its outline: locked, it moves the reference against the
+    // project (the offset); free, it moves the reference itself.
     if (const auto seekTo = seekRequest.exchange (-1.0, std::memory_order_acq_rel); seekTo >= 0.0)
-        position = jlimit (0.0, (double) current->audio.getNumSamples() - 1.0, seekTo * current->rate);
+    {
+        const auto known = lastHostSeconds.load (std::memory_order_relaxed);
+
+        if (locked.load (std::memory_order_relaxed) && known >= 0.0)
+            offset.store (seekTo - known, std::memory_order_relaxed);
+        else
+            position = jlimit (0.0, (double) current->audio.getNumSamples() - 1.0, seekTo * current->rate);
+    }
+
+    if (followsHost)
+    {
+        position = (hostSeconds + offset.load (std::memory_order_relaxed)) * current->rate;
+
+        // Seconds turned back into samples land a hair off the sample they
+        // stand for (250239.99999): that would be one sample late.
+        if (std::abs (position - std::round (position)) < 1.0e-4)
+            position = std::round (position);
+    }
 
     // The gain that brings the reference to the loudness of the mix.
     auto wantedDb = 0.0f;
@@ -511,7 +638,7 @@ void ReferencePlayer::process (AudioBuffer<float>& buffer, bool playing, bool re
     {
         gain = target;
 
-        if (playing)
+        if (playing && ! followsHost)
             position = std::fmod (position + step * numSamples, (double) length);
 
         positionSeconds.store (position / current->rate, std::memory_order_relaxed);
@@ -529,9 +656,16 @@ void ReferencePlayer::process (AudioBuffer<float>& buffer, bool playing, bool re
 
         float sample[2] = {};
 
-        if (playing)
+        // Locked, before its start or after its end, the reference is silent.
+        const auto inside = ! followsHost || (position >= 0.0 && position < (double) length);
+
+        if (playing && ! inside)
         {
-            const auto index = (int) position;
+            position += step;
+        }
+        else if (playing)
+        {
+            const auto index = jlimit (0, length - 1, (int) position);
 
             if (exact)
             {
@@ -550,7 +684,7 @@ void ReferencePlayer::process (AudioBuffer<float>& buffer, bool playing, bool re
 
             position += step;
 
-            if (position >= (double) length)
+            if (position >= (double) length && ! followsHost)
                 position -= (double) length;
         }
 

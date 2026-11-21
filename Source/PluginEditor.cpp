@@ -102,6 +102,7 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     addAndMakeVisible (phase);
     addAndMakeVisible (waveform);
     addAndMakeVisible (referenceStrip);
+    addChildComponent (referenceStrip.results);
 
     // When it measures.
     syncButton.setClickingTogglesState (true);
@@ -146,11 +147,11 @@ MeterBoxEditor::MeterBoxEditor (MeterBoxProcessor& p)
     describe ({ &waveform }, "La forme d'onde de tout ce qui a été mesuré depuis la remise à zéro, du haut (le début) vers le bas (maintenant) : la gauche à gauche, la droite à droite. En rouge, les crêtes ; en clair au milieu, le niveau RMS. Les lignes sont -12 dB, -6 dB et la pleine échelle. Une marque blanche au bord là où le true peak a dépassé le plafond. En dessous : la crête la plus haute de chaque côté depuis la remise à zéro, puis le niveau RMS de chaque côté et le facteur de crête sur la dernière seconde, et la durée mesurée.");
     describe ({ &phase }, "La phase. Le goniomètre : ce qui est identique des deux côtés monte au milieu, ce qui est en opposition s'étale à l'horizontale. La barre : la corrélation, de -1 (les côtés s'annulent en mono) à +1 (mono), avec son minimum récent. Balance : le côté le plus fort. Width : la part du son qui est sur les côtés. Mono : ce que le mix perd une fois sommé en mono. En bas, la corrélation fréquence par fréquence : sous le milieu, cette zone disparaît en mono.");
     describe ({ &referenceStrip.switchZone }, "A/B : A, tu écoutes ton mix ; B, la référence, à sa place. Le passage de l'un à l'autre est fondu, sans clic. Les mesures restent celles du mix, et les chiffres de la référence s'affichent à côté, en bleu, dans chaque partie de la fenêtre. À l'export, c'est toujours le mix qui sort.");
-    describe ({ &referenceStrip.trackZone }, "La référence : glisse un fichier audio ici (ou n'importe où sur la fenêtre), ou clique pour en chercher un (WAV, AIFF, FLAC, MP3, OGG ; M4A et AAC sur Mac). Elle avance avec la lecture du DAW, en boucle ; clique sur sa forme d'onde pour choisir où elle joue. À droite, son loudness intégré, son true peak, sa plage et sa durée, mesurés sur tout le titre. Elle est gardée avec le projet. Un lien YouTube ou TikTok glissé depuis le navigateur marche aussi.");
-    describe ({ &referenceStrip.linkButton }, "Link : prendre la référence sur une plateforme. Colle un lien YouTube ou TikTok (un lien copié est déjà dedans), puis Entrée ou Fetch. Le son est récupéré par le Downloader du site ONIRIQUE, en WAV, et gardé sur cet ordinateur (dossier « MeterBox References »). Un lien par minute sans le rôle ONIRIQUE ; 20 minutes de son au plus ; les conditions du Downloader s'appliquent.");
+    describe ({ &referenceStrip.trackZone }, "La référence : glisse un fichier audio ici (ou n'importe où sur la fenêtre), ou clique pour en chercher un (WAV, AIFF, FLAC, MP3, OGG ; M4A et AAC sur Mac). Avec Lock, elle joue au temps du projet (clique sur sa forme d'onde pour la décaler, double-clique pour revenir à zéro) ; sans, elle avance avec la lecture du DAW, en boucle, et un clic choisit où elle joue. Ce que tu charges remplace la référence en place. À droite, son loudness intégré, son true peak, sa plage et sa durée, mesurés sur tout le titre. Elle est gardée avec le projet. Un lien YouTube ou TikTok glissé depuis le navigateur marche aussi.");
+    describe ({ &referenceStrip.searchButton }, "Search : chercher la référence par son titre, son artiste ou un lien Spotify, comme sur la page « Comparer à une référence » du site : un clic sur un résultat prend son extrait officiel de 30 s (Deezer, en MP3 : l'air au-dessus de 16 kHz y est coupé). Un lien YouTube ou TikTok donne le titre entier, récupéré en WAV par le Downloader du site (un lien par minute sans le rôle ONIRIQUE). Ce qui est chargé remplace la référence en place.");
+    describe ({ &referenceStrip.lockButton }, "Lock : la référence joue au temps du projet. La seconde 72 de ton son est la seconde 72 de la référence, où que tu sois dans le DAW : deux versions du même son restent calées. Clique sur sa forme d'onde pour la décaler par rapport au projet, double-clique pour revenir à zéro. Éteint, elle avance toute seule et boucle.");
     describe ({ &referenceStrip.matchButton }, "Match : la référence est jouée au loudness intégré de ton mix, pour comparer le son et pas le volume. À côté, le gain qui lui est appliqué. Éteint, elle est jouée telle quelle.");
-    describe ({ &referenceStrip.loadButton }, "Load : chercher un fichier de référence. Sa balance tonale devient la cible Reference du spectre.");
-    describe ({ &referenceStrip.ejectButton }, "Eject : retirer la référence.");
+    describe ({ &referenceStrip.loadButton }, "Load : choisir un fichier de référence, qui remplace celui en place. Sa balance tonale devient la cible Reference du spectre.");
     describe ({ &syncButton }, "Sync : la mesure suit le transport. Elle repart de zéro quand la lecture démarre et se fige à l'arrêt. Éteint, elle tourne en continu.");
     describe ({ &pauseButton }, "Pause : fige l'intégré, l'historique et les maxima. Les niveaux instantanés, le spectre et la phase continuent.");
     describe ({ &resetButton }, "Reset : remet à zéro l'intégré, la plage, les maxima, l'historique et la moyenne du spectre.");
@@ -576,6 +577,13 @@ void MeterBoxEditor::resized()
     rules.push_back (Rectangle<float> ((float) strip.getX(), (float) strip.getY(), (float) strip.getWidth(), 1.0f));
     rules.push_back (Rectangle<float> ((float) strip.getX(), (float) strip.getBottom(), (float) strip.getWidth(), 1.0f));
     referenceStrip.setBounds (strip.reduced (0, 6));
+
+    // The results of a search open upwards from the strip, over the graphs.
+    {
+        const auto over = referenceStrip.getTrackArea().translated (referenceStrip.getX(), referenceStrip.getY());
+        const auto height = referenceStrip.results.wantedHeight();
+        referenceStrip.results.setBounds (over.getX(), over.getY() - 6 - height, jmax (420, over.getWidth()), height);
+    }
 
 
     // Four columns: the loudness, the two graphs, the waveform, the phase.

@@ -104,6 +104,10 @@ public:
         Downloader of the ONIRIQUE site. */
     void loadReferenceLink (const String&);
 
+    /** The same from a title found by searching: its official 30 s extract.
+        An MP3 extract has no air above 16 kHz: its shape is not taken as the target. */
+    void loadReferencePreview (const ReferencePlayer::Found&);
+
     AudioProcessorValueTreeState apvts;
 
 

@@ -23,6 +23,152 @@ namespace
     constexpr int kGainWidth = 64;
 }
 
+//==============================================================================
+void SearchResults::show (const Array<ReferencePlayer::Found>& titles, const String& text)
+{
+    found = titles;
+    covers.assign ((size_t) titles.size(), Image());
+    message = text;
+    hover = -1;
+    setVisible (true);
+    toFront (false);
+
+    if (auto* parent = getParentComponent())
+    {
+        const auto bottom = getBottom();
+        setBounds (getX(), bottom - wantedHeight(), getWidth(), wantedHeight());
+        parent->repaint (getBounds().getUnion (getBounds().withTop (bottom - 600)));
+    }
+
+    repaint();
+}
+
+void SearchResults::setCover (int index, const Image& cover)
+{
+    if (isPositiveAndBelow (index, (int) covers.size()))
+    {
+        covers[(size_t) index] = cover;
+        repaint();
+    }
+}
+
+void SearchResults::clear()
+{
+    found.clear();
+    covers.clear();
+    message = {};
+    setVisible (false);
+}
+
+int SearchResults::wantedHeight() const
+{
+    return kHeading + jmax (1, found.size()) * kRow + 10;
+}
+
+int SearchResults::rowAt (int y) const
+{
+    const auto row = (y - kHeading) / kRow;
+    return y >= kHeading && isPositiveAndBelow (row, found.size()) ? row : -1;
+}
+
+void SearchResults::mouseMove (const MouseEvent& e)
+{
+    const auto row = rowAt (e.y);
+
+    if (row != hover)
+    {
+        hover = row;
+        setMouseCursor (row >= 0 ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void SearchResults::mouseExit (const MouseEvent&)
+{
+    hover = -1;
+    repaint();
+}
+
+void SearchResults::mouseDown (const MouseEvent& e)
+{
+    if (const auto row = rowAt (e.y); row >= 0 && onPick != nullptr)
+        onPick (found[row]);
+}
+
+void SearchResults::paint (Graphics& g)
+{
+    using namespace theme;
+
+    const auto box = getLocalBounds().toFloat().reduced (0.5f);
+
+    g.setGradientFill (ColourGradient (onirique::look::tint (0xfa2a0a0f), 0.0f, 0.0f, onirique::look::tint (0xfa140608), 0.0f, box.getBottom(), false));
+    g.fillRoundedRectangle (box, 12.0f);
+    g.setColour (refInk.withAlpha (0.45f));
+    g.drawRoundedRectangle (box, 12.0f, 1.0f);
+
+    auto area = getLocalBounds().reduced (10, 0);
+    auto heading = area.removeFromTop (kHeading);
+
+    g.setColour (haze);
+    g.setFont (capsFont (9.0f).withExtraKerningFactor (0.25f));
+    g.drawText (String::fromUTF8 ("RÉSULTATS  ·  EXTRAITS OFFICIELS DE 30 S"), heading.withTrimmedLeft (6), Justification::centredLeft, false);
+
+    if (found.isEmpty())
+    {
+        g.setColour (message.startsWith ("RECHERCHE") ? refInk : mist);
+        g.setFont (displayFont (13.0f, false));
+        g.drawText (message, area.removeFromTop (kRow), Justification::centred, true);
+        return;
+    }
+
+    for (int i = 0; i < found.size(); ++i)
+    {
+        auto row = area.removeFromTop (kRow);
+        const auto& f = found.getReference (i);
+
+        if (i == hover)
+        {
+            g.setColour (Colours::white.withAlpha (0.07f));
+            g.fillRoundedRectangle (row.toFloat().reduced (0.0f, 2.0f), 8.0f);
+        }
+
+        // The cover, or its place while it comes.
+        const auto cover = row.removeFromLeft (kRow).reduced (6).toFloat();
+        const auto& image = covers[(size_t) i];
+
+        if (image.isValid())
+        {
+            Graphics::ScopedSaveState state (g);
+            Path clip;
+            clip.addRoundedRectangle (cover, 5.0f);
+            g.reduceClipRegion (clip);
+            g.drawImage (image, cover, RectanglePlacement::fillDestination);
+        }
+        else
+        {
+            g.setColour (Colours::white.withAlpha (0.06f));
+            g.fillRoundedRectangle (cover, 5.0f);
+        }
+
+        row.removeFromLeft (8);
+
+        const auto time = f.seconds > 0 ? String (f.seconds / 60) + ":" + String (f.seconds % 60).paddedLeft ('0', 2) : String();
+        g.setColour (haze);
+        g.setFont (monoFont (11.5f));
+        g.drawText (time, row.removeFromRight (56).withTrimmedRight (6), Justification::centredRight, false);
+
+        auto lines = row.reduced (0, 8);
+        g.setColour (i == hover ? Colours::white : mist);
+        g.setFont (displayFont (13.5f, true));
+        g.drawText (f.title, lines.removeFromTop (lines.getHeight() / 2), Justification::bottomLeft, true);
+
+        g.setColour (haze);
+        g.setFont (displayFont (12.0f, false));
+        g.drawText (f.album.isNotEmpty() ? f.artist + String::fromUTF8 ("  ·  ") + f.album : f.artist, lines, Justification::topLeft, true);
+    }
+}
+
+//==============================================================================
 ReferenceStrip::ReferenceStrip (MeterBoxProcessor& p) : processor (p)
 {
     auto& player = processor.getReference();
@@ -32,30 +178,34 @@ ReferenceStrip::ReferenceStrip (MeterBoxProcessor& p) : processor (p)
     matchButton.onClick = [this] { processor.getReference().setMatching (matchButton.getToggleState()); };
     addAndMakeVisible (matchButton);
 
+    lockButton.setClickingTogglesState (true);
+    lockButton.setToggleState (player.isLocked(), dontSendNotification);
+    lockButton.onClick = [this] { processor.getReference().setLocked (lockButton.getToggleState()); repaint(); };
+    addAndMakeVisible (lockButton);
+
     loadButton.getProperties().set ("plain", true);
     loadButton.onClick = [this] { browse(); };
     addAndMakeVisible (loadButton);
 
-    linkButton.getProperties().set ("plain", true);
-    linkButton.onClick = [this] { openLink(); };
-    addAndMakeVisible (linkButton);
+    searchButton.getProperties().set ("plain", true);
+    searchButton.onClick = [this] { openSearch(); };
+    addAndMakeVisible (searchButton);
 
     linkField.setColour (TextEditor::backgroundColourId, Colours::transparentBlack);
     linkField.setColour (TextEditor::outlineColourId, Colours::transparentBlack);
     linkField.setColour (TextEditor::focusedOutlineColourId, Colours::transparentBlack);
     linkField.setColour (TextEditor::textColourId, Colours::white);
-    linkField.setFont (monoFont (12.5f));
-    linkField.setTextToShowWhenEmpty ("https://www.youtube.com/watch?v=...", haze);
+    linkField.setFont (displayFont (13.0f, false));
+    linkField.setTextToShowWhenEmpty (String::fromUTF8 ("Titre, artiste, ou lien Spotify / YouTube / TikTok"), haze);
     linkField.setIndents (12, 0);
     linkField.setJustification (Justification::centredLeft);
-    linkField.onReturnKey = [this] { fetchLink(); };
-    linkField.onEscapeKey = [this] { closeLink(); };
+    linkField.onReturnKey = [this] { runSearch(); };
+    linkField.onEscapeKey = [this] { closeSearch(); };
     linkField.onTextChange = [this] { linkProblem = {}; repaint(); };
     addChildComponent (linkField);
 
-    ejectButton.getProperties().set ("plain", true);
-    ejectButton.onClick = [this] { processor.getReference().eject(); refresh(); };
-    addAndMakeVisible (ejectButton);
+    results.onPick = [this] (const ReferencePlayer::Found& f) { pick (f); };
+    results.setVisible (false);
 
     for (auto* zone : { &switchZone, &trackZone })
     {
@@ -71,12 +221,12 @@ void ReferenceStrip::resized()
     switchArea = area.removeFromLeft (kSwitchWidth).withSizeKeepingCentre (kSwitchWidth, 34);
     area.removeFromLeft (16);
 
-    ejectButton.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 26));
-    area.removeFromRight (6);
     loadButton.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 26));
     area.removeFromRight (6);
-    linkButton.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 26));
+    searchButton.setBounds (area.removeFromRight (76).withSizeKeepingCentre (76, 26));
     area.removeFromRight (16);
+    lockButton.setBounds (area.removeFromRight (84).withSizeKeepingCentre (84, 28));
+    area.removeFromRight (10);
     area.removeFromRight (kGainWidth);
     matchButton.setBounds (area.removeFromRight (96).withSizeKeepingCentre (96, 28));
     area.removeFromRight (16);
@@ -86,53 +236,109 @@ void ReferenceStrip::resized()
     switchZone.setBounds (switchArea);
     trackZone.setBounds (trackArea);
 
-    // The field takes the place of the reference while a link is typed, its
+    // The field takes the place of the reference while a search is typed, its
     // hint at the right.
-    linkField.setBounds (trackArea.withTrimmedRight (250).reduced (1, 3));
+    linkField.setBounds (trackArea.withTrimmedRight (210).reduced (1, 3));
 }
 
-void ReferenceStrip::openLink()
+void ReferenceStrip::openSearch()
 {
     if (linkField.isVisible())
     {
-        fetchLink();
+        runSearch();
         return;
     }
 
-    // A link copied from the browser is already in it.
+    // A link copied from the browser (Spotify, YouTube, TikTok) is already in it.
     const auto copied = SystemClipboard::getTextFromClipboard().trim();
+    const auto spotify = copied.containsIgnoreCase ("open.spotify.com/") && ! copied.containsAnyOf (" \n");
 
     linkProblem = {};
-    linkField.setText (ReferencePlayer::isPlatformLink (copied) ? copied : String(), dontSendNotification);
+
+    if (ReferencePlayer::isPlatformLink (copied) || spotify)
+        linkField.setText (copied, dontSendNotification);
+
     linkField.setVisible (true);
     linkField.grabKeyboardFocus();
     linkField.selectAll();
-    linkButton.setButtonText ("FETCH");
-    linkButton.setToggleState (true, dontSendNotification);
+    searchButton.setButtonText ("GO");
+    searchButton.setToggleState (true, dontSendNotification);
     repaint();
 }
 
-void ReferenceStrip::fetchLink()
+void ReferenceStrip::runSearch()
 {
-    const auto link = linkField.getText().trim();
+    const auto query = linkField.getText().trim();
 
-    if (! ReferencePlayer::isPlatformLink (link))
+    // A YouTube or TikTok link: the whole track, through the Downloader.
+    if (ReferencePlayer::isPlatformLink (query))
     {
-        linkProblem = String::fromUTF8 ("COLLE UN LIEN YOUTUBE OU TIKTOK");
+        processor.loadReferenceLink (query);
+        closeSearch();
+        return;
+    }
+
+    if (query.length() < 2)
+    {
+        linkProblem = String::fromUTF8 ("TAPE UN TITRE, UN ARTISTE OU UN LIEN");
         repaint();
         return;
     }
 
-    processor.loadReferenceLink (link);
-    closeLink();
+    // A title, an artist or a Spotify link: the search of the site, off the message thread.
+    const auto generation = ++searchGeneration;
+    results.show ({}, String::fromUTF8 ("RECHERCHE…"));
+
+    Thread::launch ([safe = Component::SafePointer<ReferenceStrip> (this), query, generation]
+    {
+        String problem;
+        const auto titles = ReferencePlayer::search (query, problem);
+
+        MessageManager::callAsync ([safe, titles, problem, generation]
+        {
+            if (safe != nullptr && safe->searchGeneration == generation)
+                safe->results.show (titles, problem);
+        });
+
+        // The covers, one by one, as they come.
+        for (int i = 0; i < titles.size(); ++i)
+        {
+            if (titles[i].coverUrl.isEmpty() || ! titles[i].coverUrl.startsWithIgnoreCase ("https://"))
+                continue;
+
+            if (auto in = URL (titles[i].coverUrl).createInputStream (URL::InputStreamOptions (URL::ParameterHandling::inAddress)
+                                                                          .withConnectionTimeoutMs (5000)))
+            {
+                // Read whole first: the JPEG reader does not take a stream from the network.
+                MemoryBlock bytes;
+                in->readIntoMemoryBlock (bytes, 2 * 1024 * 1024);
+                const auto cover = ImageFileFormat::loadFrom (bytes.getData(), bytes.getSize());
+
+                MessageManager::callAsync ([safe, cover, i, generation]
+                {
+                    if (safe != nullptr && safe->searchGeneration == generation)
+                        safe->results.setCover (i, cover);
+                });
+            }
+        }
+    });
 }
 
-void ReferenceStrip::closeLink()
+void ReferenceStrip::pick (const ReferencePlayer::Found& found)
 {
+    // Whatever is in place is replaced, once the new one is ready.
+    processor.loadReferencePreview (found);
+    closeSearch();
+}
+
+void ReferenceStrip::closeSearch()
+{
+    ++searchGeneration;
+    results.clear();
     linkField.setVisible (false);
     linkProblem = {};
-    linkButton.setButtonText ("LINK");
-    linkButton.setToggleState (false, dontSendNotification);
+    searchButton.setButtonText ("SEARCH");
+    searchButton.setToggleState (false, dontSendNotification);
     refresh();
 }
 
@@ -143,7 +349,8 @@ void ReferenceStrip::refresh()
     const auto& player = processor.getReference();
     matchButton.setToggleState (player.isMatching(), dontSendNotification);
     matchButton.setEnabled (track != nullptr);
-    ejectButton.setEnabled (track != nullptr || player.getStatus() == ReferencePlayer::Status::failed);
+    lockButton.setToggleState (player.isLocked(), dontSendNotification);
+    lockButton.setEnabled (track != nullptr);
 
     repaint();
 }
@@ -218,6 +425,13 @@ void ReferenceStrip::mouseDown (const MouseEvent& e)
         else
             seekTo (e.x);
     }
+}
+
+void ReferenceStrip::mouseDoubleClick (const MouseEvent& e)
+{
+    // Locked: back in step with the project, second for second.
+    if (track != nullptr && trackArea.contains (e.getPosition()))
+        processor.getReference().setOffset (0.0);
 }
 
 void ReferenceStrip::mouseDrag (const MouseEvent& e)
@@ -318,7 +532,7 @@ void ReferenceStrip::paint (Graphics& g)
 
         g.setColour (linkProblem.isNotEmpty() ? emberLit : haze);
         g.setFont (capsFont (9.0f));
-        g.drawText (linkProblem.isNotEmpty() ? linkProblem : String::fromUTF8 ("YOUTUBE / TIKTOK  ·  ENTER OU FETCH  ·  ESC"),
+        g.drawText (linkProblem.isNotEmpty() ? linkProblem : String::fromUTF8 ("ENTRÉE OU GO  ·  ESC POUR FERMER"),
                     area.withTrimmedLeft (area.getWidth() - 246.0f).withTrimmedRight (12.0f), Justification::centredRight, false);
     }
     else if (dragging)
@@ -348,7 +562,7 @@ void ReferenceStrip::paint (Graphics& g)
 
         if (status == ReferencePlayer::Status::downloading)
         {
-            text = "FETCHING THE TRACK WITH THE ONIRIQUE DOWNLOADER (UP TO A MINUTE)...";
+            text = "FETCHING THE TRACK FROM THE ONIRIQUE SITE...";
             colour = refInk;
         }
         else if (status == ReferencePlayer::Status::loading)
@@ -374,8 +588,11 @@ void ReferenceStrip::paint (Graphics& g)
         // The figures it is mastered to, at the right of the line.
         {
             const auto peak = jmax (stats.loudness.truePeak[0], stats.loudness.truePeak[1]);
+            // Locked and moved against the project: by how much.
+            const auto shift = player.isLocked() && std::abs (player.getOffset()) >= 0.005
+                                 ? "    SYNC " + signedText ((float) player.getOffset(), 2) + " s" : String();
             const auto figures = "I " + String (stats.loudness.integrated, 1) + " LUFS    TP " + String (peak, 1)
-                                 + "    LRA " + String (stats.loudness.range, 1) + "    " + clockText (track->seconds());
+                                 + "    LRA " + String (stats.loudness.range, 1) + "    " + clockText (track->seconds()) + shift;
             const auto width = GlyphArrangement::getStringWidth (monoFont (10.5f), figures) + 4.0f;
 
             if (width < top.getWidth() * 0.62f)
@@ -405,7 +622,8 @@ void ReferenceStrip::paint (Graphics& g)
         const auto outline = outlineArea();
         const auto middle = outline.getCentreY();
         const auto reach = outline.getHeight() * 0.5f;
-        const auto played = (float) (player.getPosition() / jmax (0.001, track->seconds()));
+        // Locked, the playhead can be before the start or after the end: it waits at the edge.
+        const auto played = jlimit (0.0f, 1.0f, (float) (player.getPosition() / jmax (0.001, track->seconds())));
         const auto headX = outline.getX() + played * outline.getWidth();
         const auto columns = ReferenceTrack::kColumns;
         const auto columnWidth = outline.getWidth() / (float) columns;

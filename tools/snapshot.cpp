@@ -9,6 +9,7 @@
 //   meterbox_snapshot out.png --reference   with a reference loaded (louder, brighter, wider), its figures beside the mix's
 //   meterbox_snapshot out.png --listen      the same, the reference being listened to (B)
 //   meterbox_snapshot out.png --rest        at rest, as the shop shows it: nothing played, the licence badge on
+//   meterbox_snapshot out.png --find TEXT   searches as the strip does, and shows what it found (the first is then loaded)
 //   meterbox_snapshot out.png --link URL    the reference fetched from a platform by the Downloader of the site
 //   meterbox_snapshot --selftest            the plugin as a host drives it, without a window
 #include "../Source/PluginEditor.h"
@@ -80,6 +81,21 @@ juce::File writeReference (double seconds)
     return file;
 }
 
+/** A host that says where it is: the project's time, as a DAW gives it. */
+struct FakeHead final : juce::AudioPlayHead
+{
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo info;
+        info.setIsPlaying (true);
+        info.setTimeInSamples ((juce::int64) samples);
+        info.setTimeInSeconds ((double) samples / kSr);
+        return info;
+    }
+
+    size_t samples = 0;
+};
+
 /** Plays two sides through the plugin, a block at a time. */
 void play (onirique::MeterBoxProcessor& processor, const std::vector<float>& left, const std::vector<float>& right,
            size_t from, size_t to)
@@ -102,9 +118,16 @@ void play (onirique::MeterBoxProcessor& processor, const std::vector<float>& lef
 struct Director final : juce::Timer
 {
     Director (juce::File destination, bool outOfPhase, bool withLicence, bool timed, int width, int height,
-              bool withReference, bool listen, juce::String link, bool atRest)
+              bool withReference, bool listen, juce::String link, bool atRest, juce::String find = {})
         : file (std::move (destination)), bench (timed), listening (listen), rest (atRest)
     {
+        if (find.isNotEmpty())
+        {
+            juce::String problem;
+            found = onirique::ReferencePlayer::search (find, problem);
+            std::printf ("  search \"%s\": %d found %s\n", find.toRawUTF8(), found.size(), problem.toRawUTF8());
+        }
+
         constexpr double seconds = 96.0;
 
         mtxtest::makeMusic (seconds, kSr, left, right);
@@ -128,7 +151,9 @@ struct Director final : juce::Timer
         setParameter (*processor, "span", 1.0f);
         processor->prepareToPlay (kSr, kBlock);
 
-        if (link.isNotEmpty())
+        if (! found.isEmpty())
+            processor->loadReferencePreview (found.getFirst());
+        else if (link.isNotEmpty())
             processor->loadReferenceLink (link);
         else if (withReference || listen)
             processor->loadReference (writeReference (60.0));
@@ -176,6 +201,22 @@ struct Director final : juce::Timer
             processor->getReference().setListening (true);
         }
 
+        // What the search found, laid over the graphs as the strip lays it, with its covers.
+        if (ticks == 60 && ! found.isEmpty())
+            for (auto* child : editor->getChildren())
+                if (auto* list = dynamic_cast<onirique::SearchResults*> (child))
+                {
+                    list->show (found, {});
+
+                    for (int i = 0; i < found.size(); ++i)
+                        if (auto in = juce::URL (found[i].coverUrl).createInputStream (juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)))
+                        {
+                            juce::MemoryBlock bytes;
+                            in->readIntoMemoryBlock (bytes);
+                            list->setCover (i, juce::ImageFileFormat::loadFrom (bytes.getData(), bytes.getSize()));
+                        }
+                }
+
         if (++ticks > 80)
             finish();
     }
@@ -208,6 +249,7 @@ struct Director final : juce::Timer
 
     juce::File file;
     bool bench = false, listening = false, rest = false;
+    juce::Array<onirique::ReferencePlayer::Found> found;
     std::unique_ptr<onirique::MeterBoxProcessor> processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     std::vector<float> left, right;
@@ -454,6 +496,81 @@ int selfTest()
         file.deleteFile();
     }
 
+    // Locked to the project: two versions of the same song stay in step,
+    // wherever the host starts.
+    {
+        auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("meterbox-same-song.wav");
+        file.deleteFile();
+
+        {
+            juce::AudioBuffer<float> copy (2, (int) left.size());
+            copy.copyFrom (0, 0, left.data(), (int) left.size());
+            copy.copyFrom (1, 0, right.data(), (int) right.size());
+
+            juce::WavAudioFormat wav;
+
+            if (auto* writer = wav.createWriterFor (file.createOutputStream().release(), kSr, 2, 24, {}, 0))
+            {
+                writer->writeFromAudioSampleBuffer (copy, 0, copy.getNumSamples());
+                delete writer;
+            }
+        }
+
+        auto processor = makeProcessor();
+        processor->setPlayConfigDetails (2, 2, kSr, kBlock);
+        processor->prepareToPlay (kSr, kBlock);
+
+        FakeHead head;
+        processor->setPlayHead (&head);
+
+        auto& player = processor->getReference();
+        player.load (file);
+
+        for (int wait = 0; wait < 400 && player.getStatus() == onirique::ReferencePlayer::Status::loading; ++wait)
+            juce::Thread::sleep (25);
+
+        // Played from second 5 of the project, B from the start. (Without the
+        // matching, whose gain moves while the mix's loudness settles.)
+        player.setMatching (false);
+        player.setListening (true);
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        double cross = 0.0, mine = 0.0, theirs = 0.0;
+
+        for (size_t at = (size_t) (5.0 * kSr), b = 0; at + kBlock <= (size_t) (10.0 * kSr); at += kBlock, ++b)
+        {
+            head.samples = at;
+            buffer.copyFrom (0, 0, left.data() + at, kBlock);
+            buffer.copyFrom (1, 0, right.data() + at, kBlock);
+            processor->processBlock (buffer, midi);
+
+            if (b < 20)
+                continue;
+
+            for (int i = 0; i < kBlock; ++i)
+            {
+                const double x = left[at + (size_t) i], y = buffer.getSample (0, i);
+                cross += x * y;
+                mine += x * x;
+                theirs += y * y;
+            }
+        }
+
+        const auto alignment = cross / std::sqrt (mine * theirs + 1.0e-30);
+        std::printf ("    locked, from second 5: the reference against the mix, correlation %.4f\n", alignment);
+        check (player.isLocked() && alignment > 0.999, "locked, the reference plays at the time of the project");
+
+        // Moved against the project by a click on its outline: a second later.
+        player.seek (6.0 + 1.0);   // the project is at about 10 s: the reference jumps to 7 s, three seconds back
+        head.samples = (size_t) (10.0 * kSr);
+        buffer.clear();
+        processor->processBlock (buffer, midi);
+        check (std::abs (player.getOffset() + 3.0) < 0.05, "a click on its outline moves it against the project");
+
+        processor->setPlayHead (nullptr);
+        file.deleteFile();
+    }
+
     std::printf (failures == 0 ? "\nall passed\n" : "\n%d FAILED\n", failures);
     return failures;
 }
@@ -483,7 +600,13 @@ int main (int argc, char** argv)
     const auto listen = arguments.contains ("--listen");
     const auto atRest = arguments.contains ("--rest");
     arguments.removeString ("--rest");
-    juce::String link;
+    juce::String link, find;
+
+    if (const auto at = arguments.indexOf ("--find"); at >= 0)
+    {
+        find = arguments[at + 1];
+        arguments.removeRange (at, 2);
+    }
 
     if (const auto at = arguments.indexOf ("--link"); at >= 0)
     {
@@ -502,7 +625,7 @@ int main (int argc, char** argv)
     const auto height = arguments.size() > 2 ? arguments[2].getIntValue() : 780;
 
     {
-        Director director (file, outOfPhase, withLicence, bench, width, height, withReference, listen, link, atRest);
+        Director director (file, outOfPhase, withLicence, bench, width, height, withReference, listen, link, atRest, find);
         juce::MessageManager::getInstance()->runDispatchLoop();
     }
 

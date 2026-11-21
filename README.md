@@ -53,6 +53,8 @@ build/Release/meterbox_snapshot.exe phase.png --phase        # le même, les gra
 build/Release/meterbox_snapshot.exe licence.png --licence    # avec la pastille de licence et sa page
 build/Release/meterbox_snapshot.exe snapshot.png --bench     # et le temps que prend le dessin de la fenêtre
 build/Release/meterbox_snapshot.exe ref.png --reference      # avec une référence chargée (--listen : écoutée, sur B)
+build/Release/meterbox_snapshot.exe find.png --find "titre"  # une vraie recherche, ses résultats, et le premier chargé
+build/Release/meterbox_snapshot.exe shop.png --rest          # au repos, comme la boutique le montre
 build/Release/meterbox_snapshot.exe --selftest               # le plugin comme un hôte le pilote
 ```
 
@@ -96,20 +98,34 @@ Le bandeau au-dessus du pied compare le mix à un titre de référence.
   Choisie à la main, sa balance tonale devient la cible **Reference** du
   spectre.
 - **A / B** : A, le mix ; B, la référence, jouée à sa place. Le passage est
-  fondu sur 20 ms. La référence avance quand le DAW joue, que l'on écoute A ou
-  B, et boucle à la fin ; un clic sur sa forme d'onde choisit où elle joue. Un
-  export sort toujours le mix, même sur B. Le projet rouvre toujours sur A.
+  fondu sur 20 ms. La référence avance avec le DAW, que l'on écoute A ou B
+  (voir Lock). Un export sort toujours le mix, même sur B. Le projet rouvre
+  toujours sur A.
 - **Match** : la référence est jouée au loudness intégré du mix (le court terme
   tant que l'intégré n'est pas mesuré). À côté, le gain qui lui est appliqué.
-- **Link** : la référence prise sur une plateforme. Un lien YouTube ou TikTok,
-  collé dans le champ (un lien déjà copié y est mis d'office) ou glissé depuis
-  le navigateur sur la fenêtre. Le son est récupéré en WAV par le Downloader
-  du site ONIRIQUE (`https://onirique.store/api/downloader/youtube`, le même
-  que sa page), puis gardé dans `~/Library/Onirique/MeterBox References`
-  (Mac) ou `AppData\Roaming\Onirique\MeterBox References` (Windows), et
-  chargé comme un fichier. Les limites du Downloader valent : un lien par
-  minute sans le rôle ONIRIQUE, 20 minutes de son au plus.
-- **Eject** : la retire.
+- **Search** : la référence cherchée par son titre, son artiste ou un lien
+  Spotify, comme sur la page « Comparer à une référence » du site
+  (`https://onirique.store/api/reference/search`, le catalogue de Deezer). Les
+  résultats s'ouvrent au-dessus du bandeau, avec pochette, titre, artiste,
+  album et durée ; un clic prend l'extrait officiel de 30 s
+  (`/api/reference/preview/<id>`, en MP3 : l'air au-dessus de 16 kHz y est
+  coupé, sa balance tonale ne devient donc pas la cible). Un lien YouTube ou
+  TikTok tapé ou collé là donne le titre entier, récupéré en WAV par le
+  Downloader du site (`/api/downloader/youtube`, un lien par minute sans le
+  rôle ONIRIQUE, 20 minutes au plus). Un lien glissé depuis le navigateur sur
+  la fenêtre marche aussi. Ce qui est récupéré est gardé dans
+  `~/Library/Onirique/MeterBox References` (Mac) ou
+  `AppData\Roaming\Onirique\MeterBox References` (Windows).
+- **Lock** (allumé au départ) : la référence joue au temps du projet. La
+  seconde 72 du son est la seconde 72 de la référence, où que soit le DAW :
+  deux versions du même son restent calées à l'échantillon. Un clic sur sa
+  forme d'onde la décale par rapport au projet (le décalage est écrit à côté de
+  ses chiffres), un double-clic la remet à zéro. Avant son début et après sa
+  fin, elle se tait. Éteint, elle avance toute seule quand le DAW joue, en
+  boucle, et un clic choisit où elle joue. Lock et décalage sont gardés avec le
+  projet.
+- Ce qui est chargé (fichier, recherche, lien) **remplace** la référence en
+  place dès qu'il est prêt : il n'y a pas de bouton pour l'enlever.
 
 Les mesures restent celles du mix, même sur B. Les chiffres de la référence,
 mesurés une fois sur tout le titre, sont écrits à côté, en bleu, dans chaque

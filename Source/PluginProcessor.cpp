@@ -11,6 +11,8 @@ namespace
     const Identifier kReferenceProperty ("reference");
     const Identifier kReferenceFileProperty ("referenceFile");
     const Identifier kReferenceMatchProperty ("referenceMatch");
+    const Identifier kReferenceLockProperty ("referenceLock");
+    const Identifier kReferenceOffsetProperty ("referenceOffset");
 
     float parseNumber (const String& text)
     {
@@ -189,15 +191,23 @@ void MeterBoxProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
     // moves along when the host does, sync or not.
     {
         bool hostPlaying = true;
+        double hostSeconds = -1.0;     // where the project is, when the host says
 
         if (auto* head = getPlayHead())
             if (const auto position = head->getPosition())
+            {
                 hostPlaying = position->getIsPlaying();
+
+                if (const auto seconds = position->getTimeInSeconds())
+                    hostSeconds = jmax (0.0, *seconds);
+                else if (const auto samples = position->getTimeInSamples())
+                    hostSeconds = jmax (0.0, (double) *samples / getSampleRate());
+            }
 
         const auto values = meter.loudness();
         const auto mixLufs = values.integrated > -70.0f ? values.integrated : values.shortTerm;
 
-        referencePlayer.process (buffer, hostPlaying && playing, isNonRealtime(), mixLufs);
+        referencePlayer.process (buffer, hostPlaying && playing, isNonRealtime(), mixLufs, hostSeconds);
     }
 
     // Last, and over every output: what an unlicensed plugin lets through.
@@ -312,13 +322,22 @@ bool MeterBoxProcessor::captureReference()
 void MeterBoxProcessor::loadReference (const File& file)
 {
     adoptShape.store (true);
+    referencePlayer.setOffset (0.0);
     referencePlayer.load (file);
 }
 
 void MeterBoxProcessor::loadReferenceLink (const String& link)
 {
     adoptShape.store (true);
+    referencePlayer.setOffset (0.0);
     referencePlayer.loadLink (link);
+}
+
+void MeterBoxProcessor::loadReferencePreview (const ReferencePlayer::Found& found)
+{
+    adoptShape.store (false);
+    referencePlayer.setOffset (0.0);
+    referencePlayer.loadPreview (found);
 }
 
 void MeterBoxProcessor::handleAsyncUpdate()
@@ -373,6 +392,8 @@ void MeterBoxProcessor::getStateInformation (MemoryBlock& destination)
         state.removeProperty (kReferenceFileProperty, nullptr);
 
     state.setProperty (kReferenceMatchProperty, referencePlayer.isMatching(), nullptr);
+    state.setProperty (kReferenceLockProperty, referencePlayer.isLocked(), nullptr);
+    state.setProperty (kReferenceOffsetProperty, referencePlayer.getOffset(), nullptr);
 
     if (const auto xml = state.createXml())
         copyXmlToBinary (*xml, destination);
@@ -406,6 +427,8 @@ void MeterBoxProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     // The reference the project was saved with, if it is still where it was.
     referencePlayer.setMatching ((bool) state.getProperty (kReferenceMatchProperty, true));
+    referencePlayer.setLocked ((bool) state.getProperty (kReferenceLockProperty, true));
+    referencePlayer.setOffset ((double) state.getProperty (kReferenceOffsetProperty, 0.0));
 
     const auto path = state.getProperty (kReferenceFileProperty).toString();
     const auto current = referencePlayer.getTrack();
@@ -421,6 +444,8 @@ void MeterBoxProcessor::setStateInformation (const void* data, int sizeInBytes)
 
     state.removeProperty (kReferenceFileProperty, nullptr);
     state.removeProperty (kReferenceMatchProperty, nullptr);
+    state.removeProperty (kReferenceLockProperty, nullptr);
+    state.removeProperty (kReferenceOffsetProperty, nullptr);
 
     presets.readState (state);   // l'autre côté A/B
     apvts.replaceState (state);

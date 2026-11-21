@@ -398,9 +398,10 @@ ReferenceStrip::ReferenceStrip (MeterBoxProcessor& p) : processor (p)
     addAndMakeVisible (cloudButton);
 
     // The login, off the message thread; on success, the list of the CLOUD.
-    login.onConnect = [this] (const String& mail, const String& pass, const String& twoFactor)
+    // The safe pointer is made out here: MSVC does not take `this` in a lambda within a lambda of a constructor.
+    login.onConnect = [strip = Component::SafePointer<ReferenceStrip> (this)] (const String& mail, const String& pass, const String& twoFactor)
     {
-        Thread::launch ([safe = Component::SafePointer<ReferenceStrip> (this), mail, pass, twoFactor]
+        Thread::launch ([safe = strip, mail, pass, twoFactor]
         {
             const auto result = cloud::login (mail, pass, twoFactor);
 
